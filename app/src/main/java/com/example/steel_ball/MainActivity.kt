@@ -459,15 +459,35 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
 
     var goalX = 0.15f
     var goalY = 0.15f
-    for (attempt in 0..50) {
+    // Enforce minimum distance from start zone (0.85, 0.85) to guarantee a full challenge
+    for (attempt in 0..100) {
         val gx = 0.10f + rng.nextFloat() * 0.70f
         val gy = 0.10f + rng.nextFloat() * 0.70f
-        val goalRect = PlacementRect(gx - 0.05f, gy - 0.05f, gx + 0.05f, gy + 0.05f)
-        if (canPlace(goalRect, 0.02f)) {
-            goalX = gx
-            goalY = gy
-            occupied.add(goalRect)
-            break
+        val distanceFromStart = hypot(gx - 0.85f, gy - 0.85f)
+
+        if (distanceFromStart >= 0.55f) {
+            val goalRect = PlacementRect(gx - 0.05f, gy - 0.05f, gx + 0.05f, gy + 0.05f)
+            if (canPlace(goalRect, 0.02f)) {
+                goalX = gx
+                goalY = gy
+                occupied.add(goalRect)
+                break
+            }
+        }
+    }
+
+    // Portal generation prioritized right after goal placement to guarantee early stage appearances
+    if (level >= 2 || rng.nextFloat() < 0.8f) {
+        for (attempt in 0..100) {
+            val p1x = 0.10f + rng.nextFloat() * 0.38f; val p1y = 0.10f + rng.nextFloat() * 0.38f
+            val p2x = 0.48f + rng.nextFloat() * 0.40f; val p2y = 0.48f + rng.nextFloat() * 0.40f
+            val candidate = Portal(p1x, p1y, p2x, p2y)
+            if (canPlace(candidate.getPlacementRect1(), 0.015f) && canPlace(candidate.getPlacementRect2(), 0.015f)) {
+                portal = candidate
+                occupied.add(candidate.getPlacementRect1())
+                occupied.add(candidate.getPlacementRect2())
+                break
+            }
         }
     }
 
@@ -529,20 +549,6 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
             if (canPlace(rect, 0.01f)) {
                 blackHoles.add(candidate)
                 occupied.add(rect)
-                break
-            }
-        }
-    }
-
-    if (level >= 2 || rng.nextFloat() < 0.8f) {
-        for (attempt in 0..50) {
-            val p1x = 0.10f + rng.nextFloat() * 0.38f; val p1y = 0.10f + rng.nextFloat() * 0.38f
-            val p2x = 0.48f + rng.nextFloat() * 0.40f; val p2y = 0.48f + rng.nextFloat() * 0.40f
-            val candidate = Portal(p1x, p1y, p2x, p2y)
-            if (canPlace(candidate.getPlacementRect1(), 0.015f) && canPlace(candidate.getPlacementRect2(), 0.015f)) {
-                portal = candidate
-                occupied.add(candidate.getPlacementRect1())
-                occupied.add(candidate.getPlacementRect2())
                 break
             }
         }
@@ -626,8 +632,8 @@ fun SteelBallGameScreen(
     var velocityY by remember { mutableFloatStateOf(0f) }
     var portalCooldown by remember { mutableIntStateOf(0) }
 
-    val congratulationTitles = remember { listOf("!!! UNBELIEVABLE !!!", "!!! PERFECT !!!", "!!! INSANE SKILL !!!", "!!! VICTORY !!!", "!!! MASTERED !!!") }
-    var winTitle by remember { mutableStateOf("!!! PERFECT !!!") }
+    val congratulationTitles = remember { listOf(" UNBELIEVABLE ", " PERFECT ", " INSANE SKILL ", " VICTORY ", " MASTERED ") }
+    var winTitle by remember { mutableStateOf(" PERFECT ") }
     var countdownSeconds by remember { mutableIntStateOf(3) }
 
     val ballRadius = 22f
