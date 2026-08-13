@@ -868,7 +868,7 @@ fun SteelBallGameScreen(
                             val bhY = bh.y * height
                             val dist = hypot(ballX - bhX, ballY - bhY)
                             if (dist < bh.radius * 3.8f && dist > 4f) {
-                                val pull = bh.strength / (dist * 0.03f)
+                                val pull = (bh.strength / 5f) / (dist * 0.03f)
                                 velocityX += ((bhX - ballX) / dist) * pull
                                 velocityY += ((bhY - ballY) / dist) * pull
                             }
@@ -1018,21 +1018,21 @@ fun SteelBallGameScreen(
                     drawCircle(color = Color(0xFF00FF66), radius = booster.radius, center = Offset(bx, by), style = Stroke(width = 3.5f))
                 }
 
-                // Render Black Holes
+                // Render Black Holes (Black / Brown Theme)
                 for (bh in levelLayout.blackHoles) {
                     val bhX = bh.x * width; val bhY = bh.y * height
                     val bhCenter = Offset(bhX, bhY)
 
-                    drawCircle(color = Color(0xFFFF007F).copy(alpha = 0.35f), radius = bh.radius * 1.25f, center = bhCenter)
+                    drawCircle(color = Color(0xFF3E2723).copy(alpha = 0.45f), radius = bh.radius * 1.25f, center = bhCenter)
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(Color(0xFFFFD1DC), Color(0xFFFF1493), Color(0xFFC71585)),
+                            colors = listOf(Color(0xFF8D6E63), Color(0xFF3E2723), Color(0xFF120804)),
                             center = Offset(bhX - bh.radius * 0.25f, bhY - bh.radius * 0.25f),
                             radius = bh.radius * 1.2f
                         ),
                         radius = bh.radius, center = bhCenter
                     )
-                    drawCircle(color = Color(0xFFFF69B4), radius = bh.radius, center = bhCenter, style = Stroke(width = 2.5f))
+                    drawCircle(color = Color(0xFF5D4037), radius = bh.radius, center = bhCenter, style = Stroke(width = 2.5f))
                 }
 
                 // Render Wormhole Portals
