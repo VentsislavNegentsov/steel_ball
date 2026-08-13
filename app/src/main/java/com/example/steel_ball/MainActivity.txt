@@ -1,0 +1,1142 @@
+package com.example.steel_ball
+
+import android.content.Context
+import android.content.pm.ActivityInfo
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
+import android.os.Build
+import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.compose.runtime.withFrameNanos
+import kotlinx.coroutines.delay
+import java.util.ArrayDeque
+import kotlin.math.*
+import kotlin.random.Random
+
+class MainActivity : ComponentActivity(), SensorEventListener {
+
+    private lateinit var sensorManager: SensorManager
+    private var primarySensor: Sensor? = null
+    private var vibrator: Vibrator? = null
+    private var arcadeMusicPlayer: ArcadeMusicPlayer? = null
+
+    private var pitch by mutableFloatStateOf(0f)
+    private var roll by mutableFloatStateOf(0f)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+        insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        insetsController.hide(WindowInsetsCompat.Type.systemBars())
+
+        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        primarySensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+
+        vibrator = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                vibratorManager.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            }
+        } catch (_: Exception) { null }
+
+        arcadeMusicPlayer = ArcadeMusicPlayer().apply { start() }
+
+        setContent {
+            MaterialTheme {
+                SteelBallGameScreen(
+                    pitch = pitch,
+                    roll = roll,
+                    vibrator = vibrator,
+                    arcadeMusicPlayer = arcadeMusicPlayer
+                )
+            }
+        }
+    }
+
+    override fun onSensorChanged(event: SensorEvent?) {
+        event ?: return
+        if (event.sensor.type != Sensor.TYPE_ACCELEROMETER) return
+
+        val alpha = 0.15f
+        val x = event.values[0].toDouble()
+        val y = event.values[1].toDouble()
+        val z = event.values[2].toDouble()
+
+        val rawRoll = Math.toDegrees(atan2(x, sqrt(y * y + z * z))).toFloat()
+        val rawPitch = Math.toDegrees(atan2(y, sqrt(x * x + z * z))).toFloat()
+
+        pitch += alpha * (rawPitch - pitch)
+        roll += alpha * (rawRoll - roll)
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+
+    override fun onResume() {
+        super.onResume()
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        primarySensor?.let {
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        sensorManager.unregisterListener(this)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        arcadeMusicPlayer?.stop()
+    }
+}
+
+class ArcadeMusicPlayer {
+    private var audioTrack: AudioTrack? = null
+    private var isPlaying = false
+    private var thread: Thread? = null
+
+    @Volatile
+    var currentLevel: Int = 1
+
+    fun start() {
+        if (isPlaying) return
+        isPlaying = true
+        thread = Thread {
+            val sampleRate = 22050
+            val channelConfig = AudioFormat.CHANNEL_OUT_MONO
+            val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+            val bufferSize = AudioTrack.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+
+            audioTrack = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_GAME)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(audioFormat)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(channelConfig)
+                        .build()
+                )
+                .setBufferSizeInBytes(bufferSize)
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .build()
+
+            audioTrack?.play()
+
+            val rng = Random(42)
+            var stepCounter = 0
+
+            while (isPlaying) {
+                val lvl = currentLevel
+                val mode = (lvl - 1) % 4
+
+                val (noteDurationSamples, waveValue) = when (mode) {
+                    0 -> {
+                        val dur = sampleRate / 8
+                        val scale = listOf(523.25, 587.33, 659.25, 783.99, 880.00)
+                        val freq = scale[stepCounter % scale.size]
+                        val subBass = scale[(stepCounter / 2) % scale.size] / 2.0
+                        Pair(dur) { t: Double, _: Int ->
+                            val sq = if (sin(2.0 * Math.PI * freq * t) > 0.0) 0.5 else -0.5
+                            val tri = asin(sin(2.0 * Math.PI * subBass * t)) / (Math.PI / 2.0)
+                            (sq * 0.6 + tri * 0.4)
+                        }
+                    }
+                    1 -> {
+                        val dur = sampleRate / 10
+                        val scale = listOf(440.00, 466.16, 523.25, 587.33, 659.25, 698.46)
+                        val freq = scale[(stepCounter * 2) % scale.size]
+                        val isSnare = stepCounter % 4 == 2
+                        Pair(dur) { t: Double, _: Int ->
+                            val saw = 2.0 * (freq * t - floor(freq * t + 0.5))
+                            val noise = if (isSnare) (rng.nextDouble() * 2.0 - 1.0) * 0.5 else 0.0
+                            (saw * 0.5 + noise * 0.5)
+                        }
+                    }
+                    2 -> {
+                        val dur = sampleRate / 14
+                        val scale = listOf(587.33, 698.46, 880.00, 1046.50, 1174.66)
+                        val freq = scale[(stepCounter * 3) % scale.size]
+                        Pair(dur) { t: Double, _: Int ->
+                            if (sin(2.0 * Math.PI * freq * t) > 0.2) 0.6 else -0.6
+                        }
+                    }
+                    else -> {
+                        val dur = sampleRate / 6
+                        val scale = listOf(220.00, 233.08, 277.18, 311.13, 349.23)
+                        val freq = scale[stepCounter % scale.size]
+                        Pair(dur) { t: Double, _: Int ->
+                            val sub = sin(2.0 * Math.PI * (freq / 2.0) * t)
+                            val growl = tan(sin(2.0 * Math.PI * freq * t)).coerceIn(-1.0, 1.0)
+                            (sub * 0.6 + growl * 0.4)
+                        }
+                    }
+                }
+
+                stepCounter++
+                val buffer = ShortArray(noteDurationSamples)
+
+                for (i in 0 until noteDurationSamples) {
+                    val t = i.toDouble() / sampleRate
+                    val envelope = sin((i.toDouble() / noteDurationSamples) * Math.PI)
+                    val rawSample = waveValue(t, i) * envelope
+                    buffer[i] = (rawSample * 3800.0).toInt().coerceIn(-32768, 32767).toShort()
+                }
+
+                try {
+                    audioTrack?.write(buffer, 0, buffer.size)
+                } catch (_: Exception) { break }
+            }
+        }
+        thread?.start()
+    }
+
+    fun stop() {
+        isPlaying = false
+        try {
+            audioTrack?.stop()
+            audioTrack?.release()
+        } catch (_: Exception) {}
+        audioTrack = null
+    }
+}
+
+data class ThemePalette(
+    val name: String,
+    val caseOuterBg: Color,
+    val caseInnerBg: Color,
+    val bezelBorderColor: Color,
+    val fluidCenterColor: Color,
+    val fluidEdgeColor: Color,
+    val arcadeAccentColor: Color
+)
+
+val AppThemes = listOf(
+    ThemePalette("Outrun 84", Color(0xFF140727), Color(0xFF220945), Color(0xFF6B117A), Color(0xFFFF0055), Color(0xFF990033), Color(0xFF00FFFF)),
+    ThemePalette("Cyberpunk", Color(0xFF0B0F19), Color(0xFF131C2E), Color(0xFF1F3A60), Color(0xFFFEE715), Color(0xFFC7830A), Color(0xFFFF0055)),
+    ThemePalette("Arcade Amber", Color(0xFF1A0D00), Color(0xFF2E1700), Color(0xFF663300), Color(0xFFFF8800), Color(0xFFB34700), Color(0xFFFFFF00)),
+    ThemePalette("Laser Matrix", Color(0xFF021508), Color(0xFF072B12), Color(0xFF0F5927), Color(0xFF00FF66), Color(0xFF008F38), Color(0xFF00E5FF))
+)
+
+data class PlacementRect(val minX: Float, val minY: Float, val maxX: Float, val maxY: Float) {
+    fun overlaps(other: PlacementRect, padding: Float = 0.03f): Boolean {
+        return !(this.maxX + padding < other.minX ||
+                this.minX - padding > other.maxX ||
+                this.maxY + padding < other.minY ||
+                this.minY - padding > other.maxY)
+    }
+}
+
+data class Wall(
+    val x: Float, val y: Float, val width: Float, val height: Float,
+    val isMoving: Boolean = false, val moveAxis: Char = 'H', val moveRange: Float = 0.12f, val speed: Float = 0.6f
+) {
+    fun getPlacementRect(): PlacementRect {
+        val sweepMinX = x - if (isMoving && moveAxis == 'H') moveRange else 0f
+        val sweepMaxX = x + width + if (isMoving && moveAxis == 'H') moveRange else 0f
+        val sweepMinY = y - if (isMoving && moveAxis == 'V') moveRange else 0f
+        val sweepMaxY = y + height + if (isMoving && moveAxis == 'V') moveRange else 0f
+        return PlacementRect(sweepMinX, sweepMinY, sweepMaxX, sweepMaxY)
+    }
+}
+
+data class Hazard(
+    val x: Float, val y: Float, val radius: Float,
+    val isMoving: Boolean = false, val speed: Float = 0.5f, val pathRadius: Float = 0.1f, val seedOffset: Float = 0f
+) {
+    fun getPlacementRect(): PlacementRect {
+        val rFrac = 0.035f
+        val sweepRadius = if (isMoving) pathRadius + rFrac else rFrac
+        return PlacementRect(x - sweepRadius, y - sweepRadius, x + sweepRadius, y + sweepRadius)
+    }
+}
+
+data class PinballBumper(val x: Float, val y: Float, val radius: Float) {
+    fun getPlacementRect(): PlacementRect = PlacementRect(x - 0.04f, y - 0.04f, x + 0.04f, y + 0.04f)
+}
+
+data class SpeedBooster(val x: Float, val y: Float, val radius: Float = 26f, val dirX: Float, val dirY: Float) {
+    fun getPlacementRect(): PlacementRect = PlacementRect(x - 0.045f, y - 0.045f, x + 0.045f, y + 0.045f)
+}
+
+data class Portal(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val radius: Float = 22f) {
+    fun getPlacementRect1(): PlacementRect = PlacementRect(x1 - 0.04f, y1 - 0.04f, x1 + 0.04f, y1 + 0.04f)
+    fun getPlacementRect2(): PlacementRect = PlacementRect(x2 - 0.04f, y2 - 0.04f, x2 + 0.04f, y2 + 0.04f)
+}
+
+// Variable size BlackHole class
+data class BlackHole(val x: Float, val y: Float, val radius: Float = 22f, val strength: Float = 0.42f) {
+    fun getPlacementRect(): PlacementRect {
+        val frac = (radius / 300f).coerceAtLeast(0.04f)
+        return PlacementRect(x - frac, y - frac, x + frac, y + frac)
+    }
+}
+
+data class IcePatch(val x: Float, val y: Float, val width: Float, val height: Float) {
+    fun getPlacementRect(): PlacementRect = PlacementRect(x, y, x + width, y + height)
+}
+
+data class LevelLayout(
+    val walls: List<Wall>,
+    val hazards: List<Hazard>,
+    val bumpers: List<PinballBumper>,
+    val boosters: List<SpeedBooster>,
+    val portal: Portal?,
+    val blackHoles: List<BlackHole>,
+    val icePatches: List<IcePatch>,
+    val goalX: Float,
+    val goalY: Float
+)
+
+fun isLevelPassable(layout: LevelLayout): Boolean {
+    val gridSize = 40
+    val grid = Array(gridSize) { BooleanArray(gridSize) { true } }
+    val ballMargin = 0.05f
+
+    for (wall in layout.walls) {
+        val rect = wall.getPlacementRect()
+        val startGx = ((rect.minX - ballMargin) * gridSize).toInt().coerceIn(0, gridSize - 1)
+        val endGx = ((rect.maxX + ballMargin) * gridSize).toInt().coerceIn(0, gridSize - 1)
+        val startGy = ((rect.minY - ballMargin) * gridSize).toInt().coerceIn(0, gridSize - 1)
+        val endGy = ((rect.maxY + ballMargin) * gridSize).toInt().coerceIn(0, gridSize - 1)
+
+        for (gx in startGx..endGx) {
+            for (gy in startGy..endGy) { grid[gx][gy] = false }
+        }
+    }
+
+    val startGx = (0.85f * gridSize).toInt().coerceIn(0, gridSize - 1)
+    val startGy = (0.85f * gridSize).toInt().coerceIn(0, gridSize - 1)
+    val goalGx = (layout.goalX * gridSize).toInt().coerceIn(0, gridSize - 1)
+    val goalGy = (layout.goalY * gridSize).toInt().coerceIn(0, gridSize - 1)
+
+    if (!grid[startGx][startGy] || !grid[goalGx][goalGy]) return false
+
+    val queue = ArrayDeque<Pair<Int, Int>>()
+    val visited = Array(gridSize) { BooleanArray(gridSize) }
+    queue.add(Pair(startGx, startGy))
+    visited[startGx][startGy] = true
+
+    val dx = intArrayOf(1, -1, 0, 0, 1, 1, -1, -1)
+    val dy = intArrayOf(0, 0, 1, -1, 1, -1, 1, -1)
+
+    while (queue.isNotEmpty()) {
+        val (cx, cy) = queue.poll() ?: break
+        if (abs(cx - goalGx) <= 1 && abs(cy - goalGy) <= 1) return true
+
+        for (i in 0..7) {
+            val nx = cx + dx[i]
+            val ny = cy + dy[i]
+            if (nx in 0 until gridSize && ny in 0 until gridSize && grid[nx][ny] && !visited[nx][ny]) {
+                visited[nx][ny] = true
+                queue.add(Pair(nx, ny))
+            }
+        }
+    }
+    return false
+}
+
+fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
+    val rng = Random(seed)
+    val occupied = mutableListOf<PlacementRect>()
+
+    val startZone = PlacementRect(0.72f, 0.72f, 0.98f, 0.98f)
+    occupied.add(startZone)
+
+    val walls = mutableListOf<Wall>()
+    val hazards = mutableListOf<Hazard>()
+    val bumpers = mutableListOf<PinballBumper>()
+    val boosters = mutableListOf<SpeedBooster>()
+    var portal: Portal? = null
+    val blackHoles = mutableListOf<BlackHole>()
+    val icePatches = mutableListOf<IcePatch>()
+
+    // Continuous speed multiplier that accelerates with level progression
+    val speedMultiplier = 1.0f + (level - 1) * 0.15f
+
+    val availableMechanics = mutableListOf<String>()
+    if (level >= 2) availableMechanics.addAll(listOf("HAZARDS", "MOVING_WALLS", "BLACK_HOLES"))
+    if (level >= 3) availableMechanics.addAll(listOf("BOOSTERS", "ICE"))
+    if (level >= 4) availableMechanics.addAll(listOf("PORTAL"))
+
+    val chosenGimmicks = if (availableMechanics.isEmpty()) emptySet() else {
+        val maxGimmicks = (1 + (level / 2)).coerceAtMost(availableMechanics.size)
+        availableMechanics.shuffled(rng).take(maxGimmicks).toSet()
+    }
+
+    fun canPlace(rect: PlacementRect, padding: Float = 0.03f): Boolean {
+        return occupied.none { it.overlaps(rect, padding) }
+    }
+
+    var goalX = 0.2f
+    var goalY = 0.2f
+    for (attempt in 0..50) {
+        val gx = 0.12f + rng.nextFloat() * 0.65f
+        val gy = 0.12f + rng.nextFloat() * 0.65f
+        val goalRect = PlacementRect(gx - 0.06f, gy - 0.06f, gx + 0.06f, gy + 0.06f)
+        if (canPlace(goalRect, 0.04f)) {
+            goalX = gx
+            goalY = gy
+            occupied.add(goalRect)
+            break
+        }
+    }
+
+    fun tryAddWall(baseW: Float, baseH: Float, isMoving: Boolean, axis: Char) {
+        for (attempt in 0..50) {
+            val wx = 0.12f + rng.nextFloat() * (0.75f - baseW)
+            val wy = 0.12f + rng.nextFloat() * (0.75f - baseH)
+            val range = if (isMoving) 0.12f + (level * 0.01f).coerceAtMost(0.1f) else 0f
+            val wallSpeed = (0.5f + rng.nextFloat() * 0.4f) * speedMultiplier
+
+            val candidate = Wall(wx, wy, baseW, baseH, isMoving, axis, range, wallSpeed)
+            val rect = candidate.getPlacementRect()
+
+            if (canPlace(rect, 0.02f)) {
+                walls.add(candidate)
+                occupied.add(rect)
+                break
+            }
+        }
+    }
+
+    // Static wall quantity scales with level
+    val staticWallCount = (1 + level / 3).coerceAtMost(6)
+    for (w in 0 until staticWallCount) {
+        val isVert = rng.nextBoolean()
+        tryAddWall(
+            baseW = if (isVert) 0.04f else 0.22f + rng.nextFloat() * 0.08f,
+            baseH = if (isVert) 0.18f + rng.nextFloat() * 0.08f else 0.04f,
+            isMoving = false,
+            axis = 'H'
+        )
+    }
+
+    if (chosenGimmicks.contains("MOVING_WALLS") || level >= 3) {
+        val movingCount = (1 + level / 4).coerceAtMost(4)
+        for (i in 0 until movingCount) {
+            tryAddWall(0.18f, 0.04f, true, if (rng.nextBoolean()) 'H' else 'V')
+        }
+    }
+
+    // Black Holes with variable sizes (small to supermassive)
+    if (chosenGimmicks.contains("BLACK_HOLES") || level >= 2) {
+        val bhCount = (1 + level / 3).coerceAtMost(5)
+        for (i in 0 until bhCount) {
+            for (attempt in 0..40) {
+                val bhx = 0.18f + rng.nextFloat() * 0.64f
+                val bhy = 0.18f + rng.nextFloat() * 0.64f
+
+                // Randomized size: 16dp radius up to 38dp radius
+                val randomRadius = 16f + rng.nextFloat() * 22f
+                // Gravitational pull strength scales with size and level
+                val strength = (randomRadius / 22f) * (0.32f + (level * 0.03f))
+
+                val candidate = BlackHole(bhx, bhy, radius = randomRadius, strength = strength)
+                val rect = candidate.getPlacementRect()
+                if (canPlace(rect, 0.03f)) {
+                    blackHoles.add(candidate)
+                    occupied.add(rect)
+                    break
+                }
+            }
+        }
+    }
+
+    if (chosenGimmicks.contains("PORTAL") || level >= 5) {
+        for (attempt in 0..50) {
+            val p1x = 0.15f + rng.nextFloat() * 0.3f; val p1y = 0.15f + rng.nextFloat() * 0.3f
+            val p2x = 0.55f + rng.nextFloat() * 0.3f; val p2y = 0.55f + rng.nextFloat() * 0.3f
+            val candidate = Portal(p1x, p1y, p2x, p2y)
+            if (canPlace(candidate.getPlacementRect1(), 0.03f) && canPlace(candidate.getPlacementRect2(), 0.03f)) {
+                portal = candidate
+                occupied.add(candidate.getPlacementRect1())
+                occupied.add(candidate.getPlacementRect2())
+                break
+            }
+        }
+    }
+
+    if (chosenGimmicks.contains("ICE")) {
+        val iceCount = (1 + level / 4).coerceAtMost(3)
+        for (i in 0 until iceCount) {
+            for (attempt in 0..40) {
+                val ix = 0.18f + rng.nextFloat() * 0.45f
+                val iy = 0.18f + rng.nextFloat() * 0.45f
+                val candidate = IcePatch(ix, iy, 0.22f, 0.22f)
+                val rect = candidate.getPlacementRect()
+                if (canPlace(rect, 0.02f)) {
+                    icePatches.add(candidate)
+                    occupied.add(rect)
+                    break
+                }
+            }
+        }
+    }
+
+    if (chosenGimmicks.contains("BOOSTERS")) {
+        val boosterCount = (1 + level / 3).coerceAtMost(4)
+        for (i in 0 until boosterCount) {
+            for (attempt in 0..40) {
+                val bx = 0.15f + rng.nextFloat() * 0.7f
+                val by = 0.15f + rng.nextFloat() * 0.7f
+                val angle = rng.nextFloat() * 2f * Math.PI.toFloat()
+                val candidate = SpeedBooster(bx, by, dirX = cos(angle) * (1.8f + level * 0.1f), dirY = sin(angle) * (1.8f + level * 0.1f))
+                val rect = candidate.getPlacementRect()
+                if (canPlace(rect, 0.03f)) {
+                    boosters.add(candidate)
+                    occupied.add(rect)
+                    break
+                }
+            }
+        }
+    }
+
+    if (chosenGimmicks.contains("HAZARDS") || level >= 2) {
+        val hazardCount = (1 + level / 2).coerceAtMost(8)
+        for (i in 0 until hazardCount) {
+            for (attempt in 0..40) {
+                val hx = 0.15f + rng.nextFloat() * 0.7f
+                val hy = 0.15f + rng.nextFloat() * 0.7f
+                val isHazardMoving = rng.nextBoolean() || level >= 4
+                val candidate = Hazard(
+                    x = hx, y = hy, radius = 18f, isMoving = isHazardMoving,
+                    speed = (0.4f + rng.nextFloat() * 0.5f) * speedMultiplier,
+                    pathRadius = if (isHazardMoving) 0.08f + (level * 0.005f) else 0f, seedOffset = rng.nextFloat() * 10f
+                )
+                val rect = candidate.getPlacementRect()
+                if (canPlace(rect, 0.025f)) {
+                    hazards.add(candidate)
+                    occupied.add(rect)
+                    break
+                }
+            }
+        }
+    }
+
+    val bumperCount = (1 + level / 2).coerceAtMost(5)
+    for (i in 0 until bumperCount) {
+        for (attempt in 0..40) {
+            val bx = 0.18f + rng.nextFloat() * 0.64f
+            val by = 0.18f + rng.nextFloat() * 0.64f
+            val candidate = PinballBumper(bx, by, radius = 16f + rng.nextFloat() * 8f)
+            val rect = candidate.getPlacementRect()
+            if (canPlace(rect, 0.02f)) {
+                bumpers.add(candidate)
+                occupied.add(rect)
+                break
+            }
+        }
+    }
+
+    return LevelLayout(walls, hazards, bumpers, boosters, portal, blackHoles, icePatches, goalX, goalY)
+}
+
+fun generateRandomizedAILevel(level: Int): LevelLayout {
+    var seed = level * 31337L
+    while (true) {
+        val layout = buildSingleLevelCandidate(level, seed)
+        if (isLevelPassable(layout)) return layout
+        seed += 10007L
+    }
+}
+
+@Composable
+fun SteelBallGameScreen(
+    pitch: Float, roll: Float, vibrator: Vibrator?, arcadeMusicPlayer: ArcadeMusicPlayer?
+) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("steel_ball_prefs", Context.MODE_PRIVATE) }
+
+    var currentLevel by remember { mutableIntStateOf(prefs.getInt("current_level", 1).coerceAtLeast(1)) }
+    var maxLevelReached by remember { mutableIntStateOf(prefs.getInt("max_level", currentLevel).coerceAtLeast(currentLevel)) }
+
+    val theme = AppThemes[(currentLevel - 1) % AppThemes.size]
+
+    var gameState by remember { mutableStateOf("PLAYING") }
+    var ballX by remember { mutableFloatStateOf(-1f) }
+    var ballY by remember { mutableFloatStateOf(-1f) }
+    var velocityX by remember { mutableFloatStateOf(0f) }
+    var velocityY by remember { mutableFloatStateOf(0f) }
+    var portalCooldown by remember { mutableIntStateOf(0) }
+
+    val congratulationTitles = remember { listOf("!!! GREAT !!!", "!!! AWESOME !!!", "!!! EXCELLENT !!!", "!!! VICTORY !!!", "!!! AMAZING !!!") }
+    var winTitle by remember { mutableStateOf("!!! GREAT !!!") }
+    var countdownSeconds by remember { mutableIntStateOf(3) }
+
+    val ballRadius = 22f
+    val baseFriction = 0.96f
+    val accelerationFactor = 0.35f
+
+    val levelLayout = remember(currentLevel) { generateRandomizedAILevel(currentLevel) }
+    var elapsedTime by remember { mutableFloatStateOf(0f) }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "lava")
+    val lavaOffset by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = 100f,
+        animationSpec = infiniteRepeatable(animation = tween(1200, easing = LinearEasing), repeatMode = RepeatMode.Restart),
+        label = "lavaOffset"
+    )
+
+    LaunchedEffect(currentLevel) { arcadeMusicPlayer?.currentLevel = currentLevel }
+
+    LaunchedEffect(gameState) {
+        if (gameState == "WON") {
+            countdownSeconds = 3
+            delay(1000L); if (gameState == "WON") countdownSeconds = 2
+            delay(1000L); if (gameState == "WON") countdownSeconds = 1
+            delay(1000L)
+            if (gameState == "WON") {
+                currentLevel++
+                if (currentLevel > maxLevelReached) {
+                    maxLevelReached = currentLevel
+                    prefs.edit().putInt("max_level", maxLevelReached).apply()
+                }
+                prefs.edit().putInt("current_level", currentLevel).apply()
+                gameState = "PLAYING"
+                ballX = -1f; ballY = -1f; velocityX = 0f; velocityY = 0f
+            }
+        } else if (gameState == "DEAD") {
+            countdownSeconds = 3
+            delay(1000L); if (gameState == "DEAD") countdownSeconds = 2
+            delay(1000L); if (gameState == "DEAD") countdownSeconds = 1
+            delay(1000L)
+            if (gameState == "DEAD") {
+                gameState = "PLAYING"
+                ballX = -1f; ballY = -1f; velocityX = 0f; velocityY = 0f
+            }
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(theme.caseOuterBg)
+            .systemBarsPadding()
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        // Navigation Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(
+                onClick = {
+                    if (currentLevel > 1) {
+                        currentLevel--
+                        prefs.edit().putInt("current_level", currentLevel).apply()
+                        gameState = "PLAYING"
+                        ballX = -1f; ballY = -1f; velocityX = 0f; velocityY = 0f
+                    }
+                },
+                enabled = currentLevel > 1,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = theme.caseInnerBg),
+                border = BorderStroke(1.dp, theme.bezelBorderColor),
+                modifier = Modifier.height(32.dp)
+            ) {
+                Text(
+                    text = "◀",
+                    color = if (currentLevel > 1) Color.White else Color.DarkGray,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.rotate(90f)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            // Compact 2-line level title format
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.rotate(90f)
+            ) {
+                Text(
+                    text = "STAGE",
+                    color = theme.arcadeAccentColor,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    text = "$currentLevel",
+                    color = theme.arcadeAccentColor,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Black
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Button(
+                onClick = {
+                    if (currentLevel < maxLevelReached) {
+                        currentLevel++
+                        prefs.edit().putInt("current_level", currentLevel).apply()
+                        gameState = "PLAYING"
+                        ballX = -1f; ballY = -1f; velocityX = 0f; velocityY = 0f
+                    }
+                },
+                enabled = currentLevel < maxLevelReached,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = theme.caseInnerBg),
+                border = BorderStroke(1.dp, theme.bezelBorderColor),
+                modifier = Modifier.height(32.dp)
+            ) {
+                Text(
+                    text = "▶",
+                    color = if (currentLevel < maxLevelReached) Color.White else Color.DarkGray,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.rotate(90f)
+                )
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .shadow(16.dp, RoundedCornerShape(24.dp))
+                .clip(RoundedCornerShape(24.dp))
+                .background(theme.caseInnerBg)
+                .border(2.dp, theme.arcadeAccentColor, RoundedCornerShape(24.dp))
+                .padding(12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(currentLevel, levelLayout) {
+                        detectTapGestures(
+                            onDoubleTap = { tapOffset ->
+                                val width = size.width.toFloat()
+                                val height = size.height.toFloat()
+
+                                // Double-tapping on variable-sized Black Hole launches ball in random direction
+                                for (bh in levelLayout.blackHoles) {
+                                    val bhX = bh.x * width
+                                    val bhY = bh.y * height
+                                    val hitArea = bh.radius * 2.5f
+
+                                    if (hypot(tapOffset.x - bhX, tapOffset.y - bhY) <= hitArea) {
+                                        ballX = bhX
+                                        ballY = bhY
+                                        val randomAngle = Random.nextFloat() * 2f * Math.PI.toFloat()
+                                        val impulseSpeed = 16f
+                                        velocityX = cos(randomAngle) * impulseSpeed
+                                        velocityY = sin(randomAngle) * impulseSpeed
+
+                                        try {
+                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                                vibrator?.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE))
+                                            } else { @Suppress("DEPRECATION") vibrator?.vibrate(40) }
+                                        } catch (_: Exception) {}
+                                        break
+                                    }
+                                }
+                            }
+                        )
+                    }
+            ) {
+                val width = size.width
+                val height = size.height
+                if (width <= 0f || height <= 0f) return@Canvas
+
+                if (ballX < 0f || ballY < 0f) {
+                    ballX = width * 0.85f
+                    ballY = height * 0.85f
+                    velocityX = 0f
+                    velocityY = 0f
+                }
+
+                val startPos = Offset(width * 0.85f, height * 0.85f)
+                val goalPos = Offset(levelLayout.goalX * width, levelLayout.goalY * height)
+                val goalRadius = 34f
+
+                var friction = baseFriction
+                for (ice in levelLayout.icePatches) {
+                    val ix = ice.x * width
+                    val iy = ice.y * height
+                    val iw = ice.width * width
+                    val ih = ice.height * height
+                    if (ballX in ix..(ix + iw) && ballY in iy..(iy + ih)) {
+                        friction = 0.992f
+                    }
+                }
+
+                if (gameState == "PLAYING") {
+                    if (portalCooldown > 0) portalCooldown--
+
+                    val subSteps = 4
+                    val subAx = (-roll / 30f).coerceIn(-1f, 1f) * accelerationFactor / subSteps
+                    val subAy = (pitch / 30f).coerceIn(-1f, 1f) * accelerationFactor / subSteps
+
+                    for (step in 0 until subSteps) {
+                        velocityX = (velocityX + subAx) * (friction.pow(1f / subSteps))
+                        velocityY = (velocityY + subAy) * (friction.pow(1f / subSteps))
+
+                        // Variable gravity field based on individual BlackHole radius & strength
+                        for (bh in levelLayout.blackHoles) {
+                            val bhX = bh.x * width
+                            val bhY = bh.y * height
+                            val dist = hypot(ballX - bhX, ballY - bhY)
+                            if (dist < bh.radius * 3.0f && dist > 4f) {
+                                val pull = bh.strength / (dist * 0.04f)
+                                velocityX += ((bhX - ballX) / dist) * pull
+                                velocityY += ((bhY - ballY) / dist) * pull
+                            }
+                        }
+
+                        var nextX = ballX + velocityX / subSteps
+                        var nextY = ballY + velocityY / subSteps
+
+                        if (nextX - ballRadius < 0f) { nextX = ballRadius; velocityX = -velocityX * 0.3f }
+                        if (nextX + ballRadius > width) { nextX = width - ballRadius; velocityX = -velocityX * 0.3f }
+                        if (nextY - ballRadius < 0f) { nextY = ballRadius; velocityY = -velocityY * 0.3f }
+                        if (nextY + ballRadius > height) { nextY = height - ballRadius; velocityY = -velocityY * 0.3f }
+
+                        for (wall in levelLayout.walls) {
+                            val currentWx = if (wall.isMoving && wall.moveAxis == 'H') wall.x + sin(elapsedTime * wall.speed) * wall.moveRange else wall.x
+                            val currentWy = if (wall.isMoving && wall.moveAxis == 'V') wall.y + cos(elapsedTime * wall.speed) * wall.moveRange else wall.y
+                            val wx = currentWx * width; val wy = currentWy * height
+                            val ww = wall.width * width; val wh = wall.height * height
+
+                            if (nextX + ballRadius > wx && nextX - ballRadius < wx + ww && nextY + ballRadius > wy && nextY - ballRadius < wy + wh) {
+                                if (wall.isMoving) {
+                                    gameState = "DEAD"
+                                    try {
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                            vibrator?.vibrate(VibrationEffect.createOneShot(250, VibrationEffect.DEFAULT_AMPLITUDE))
+                                        } else { @Suppress("DEPRECATION") vibrator?.vibrate(250) }
+                                    } catch (_: Exception) {}
+                                    break
+                                } else {
+                                    val overlapX = min(nextX + ballRadius - wx, wx + ww - (nextX - ballRadius))
+                                    val overlapY = min(nextY + ballRadius - wy, wy + wh - (nextY - ballRadius))
+                                    if (overlapX < overlapY) {
+                                        nextX = if (nextX < wx + ww / 2) wx - ballRadius else wx + ww + ballRadius
+                                        velocityX = -velocityX * 0.2f
+                                    } else {
+                                        nextY = if (nextY < wy + wh / 2) wy - ballRadius else wy + wh + ballRadius
+                                        velocityY = -velocityY * 0.2f
+                                    }
+                                }
+                            }
+                        }
+
+                        if (gameState != "PLAYING") break
+
+                        for (booster in levelLayout.boosters) {
+                            val bx = booster.x * width
+                            val by = booster.y * height
+                            if (hypot(nextX - bx, nextY - by) < ballRadius + booster.radius) {
+                                velocityX += booster.dirX * 3.5f
+                                velocityY += booster.dirY * 3.5f
+                            }
+                        }
+
+                        levelLayout.portal?.let { p ->
+                            if (portalCooldown == 0) {
+                                val p1x = p.x1 * width; val p1y = p.y1 * height
+                                val p2x = p.x2 * width; val p2y = p.y2 * height
+
+                                if (hypot(nextX - p1x, nextY - p1y) < ballRadius + p.radius) {
+                                    nextX = p2x; nextY = p2y; portalCooldown = 30
+                                } else if (hypot(nextX - p2x, nextY - p2y) < ballRadius + p.radius) {
+                                    nextX = p1x; nextY = p1y; portalCooldown = 30
+                                }
+                            }
+                        }
+
+                        for (bumper in levelLayout.bumpers) {
+                            val bx = bumper.x * width; val by = bumper.y * height
+                            val dist = hypot(nextX - bx, nextY - by)
+                            if (dist < ballRadius + bumper.radius) {
+                                val nx = (nextX - bx) / dist; val ny = (nextY - by) / dist
+                                nextX = bx + nx * (ballRadius + bumper.radius)
+                                nextY = by + ny * (ballRadius + bumper.radius)
+                                val dot = velocityX * nx + velocityY * ny
+                                velocityX = (velocityX - 2 * dot * nx) * 1.2f
+                                velocityY = (velocityY - 2 * dot * ny) * 1.2f
+                            }
+                        }
+
+                        ballX = nextX; ballY = nextY
+                    }
+
+                    for (hazard in levelLayout.hazards) {
+                        val hx = (if (hazard.isMoving) hazard.x + sin(elapsedTime * hazard.speed + hazard.seedOffset) * hazard.pathRadius else hazard.x) * width
+                        val hy = (if (hazard.isMoving) hazard.y + cos(elapsedTime * (hazard.speed * 0.8f) + hazard.seedOffset) * hazard.pathRadius else hazard.y) * height
+                        if (hypot(ballX - hx, ballY - hy) < ballRadius + hazard.radius * 0.6f) {
+                            gameState = "DEAD"
+                            try {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                    vibrator?.vibrate(VibrationEffect.createOneShot(250, VibrationEffect.DEFAULT_AMPLITUDE))
+                                } else { @Suppress("DEPRECATION") vibrator?.vibrate(250) }
+                            } catch (_: Exception) {}
+                        }
+                    }
+
+                    if (hypot(ballX - goalPos.x, ballY - goalPos.y) < goalRadius * 0.8f) {
+                        winTitle = congratulationTitles.random()
+                        gameState = "WON"
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                vibrator?.vibrate(VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE))
+                            } else { @Suppress("DEPRECATION") vibrator?.vibrate(100) }
+                        } catch (_: Exception) {}
+                    }
+                }
+
+                for (ice in levelLayout.icePatches) {
+                    val ix = ice.x * width; val iy = ice.y * height
+                    val iw = ice.width * width; val ih = ice.height * height
+                    drawRoundRect(
+                        color = Color(0x8888E5FF),
+                        topLeft = Offset(ix, iy), size = Size(iw, ih),
+                        cornerRadius = CornerRadius(12f, 12f)
+                    )
+                    drawRoundRect(
+                        color = Color.White.copy(alpha = 0.8f),
+                        topLeft = Offset(ix, iy), size = Size(iw, ih),
+                        cornerRadius = CornerRadius(12f, 12f),
+                        style = Stroke(width = 2f)
+                    )
+                }
+
+                for (booster in levelLayout.boosters) {
+                    val bx = booster.x * width; val by = booster.y * height
+                    drawCircle(color = Color(0xFF00FF66).copy(alpha = 0.3f), radius = booster.radius * 1.3f, center = Offset(bx, by))
+                    drawCircle(color = Color(0xFF00FF66), radius = booster.radius, center = Offset(bx, by), style = Stroke(width = 3f))
+
+                    val arrowPath = Path().apply {
+                        moveTo(bx + booster.dirX * 12f, by + booster.dirY * 12f)
+                        lineTo(bx - booster.dirY * 8f, by + booster.dirX * 8f)
+                        lineTo(bx + booster.dirY * 8f, by - booster.dirX * 8f)
+                        close()
+                    }
+                    drawPath(arrowPath, color = Color.White)
+                }
+
+                // Render Variable-Sized Black Holes
+                for (bh in levelLayout.blackHoles) {
+                    val bhX = bh.x * width; val bhY = bh.y * height
+                    val bhCenter = Offset(bhX, bhY)
+
+                    // Outer vibrant magenta ring
+                    drawCircle(color = Color(0xFFFF00CC), radius = bh.radius, center = bhCenter, style = Stroke(width = 3.5f))
+                    // Radial gradient core proportional to bh.radius
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0xFFFF66CC), Color(0x99CC0088), Color.Transparent),
+                            center = bhCenter,
+                            radius = bh.radius * 1.3f
+                        ),
+                        radius = bh.radius, center = bhCenter
+                    )
+                }
+
+                levelLayout.portal?.let { p ->
+                    val p1 = Offset(p.x1 * width, p.y1 * height)
+                    val p2 = Offset(p.x2 * width, p.y2 * height)
+
+                    drawCircle(color = Color(0xFFFF00CC), radius = p.radius, center = p1, style = Stroke(width = 4f))
+                    drawCircle(color = Color(0xFF00FFFF), radius = p.radius, center = p2, style = Stroke(width = 4f))
+                }
+
+                drawCircle(color = Color.Green.copy(alpha = 0.25f), radius = 36f, center = startPos)
+                drawCircle(color = Color.Green, radius = 36f, center = startPos, style = Stroke(width = 2f))
+
+                drawCircle(brush = Brush.radialGradient(colors = listOf(theme.fluidCenterColor, theme.caseOuterBg), center = goalPos, radius = goalRadius), radius = goalRadius, center = goalPos)
+                drawCircle(color = theme.fluidCenterColor, radius = goalRadius, center = goalPos, style = Stroke(width = 3f))
+
+                for (hazard in levelLayout.hazards) {
+                    val hx = (if (hazard.isMoving) hazard.x + sin(elapsedTime * hazard.speed + hazard.seedOffset) * hazard.pathRadius else hazard.x) * width
+                    val hy = (if (hazard.isMoving) hazard.y + cos(elapsedTime * (hazard.speed * 0.8f) + hazard.seedOffset) * hazard.pathRadius else hazard.y) * height
+                    val hCenter = Offset(hx, hy)
+                    drawCircle(brush = Brush.radialGradient(colors = listOf(Color(0xFFFFCC00), Color(0xFFFF0055), Color(0xFFFF3300)), center = hCenter, radius = hazard.radius), radius = hazard.radius, center = hCenter)
+                }
+
+                for (wall in levelLayout.walls) {
+                    val currentWx = if (wall.isMoving && wall.moveAxis == 'H') wall.x + sin(elapsedTime * wall.speed) * wall.moveRange else wall.x
+                    val currentWy = if (wall.isMoving && wall.moveAxis == 'V') wall.y + cos(elapsedTime * wall.speed) * wall.moveRange else wall.y
+                    val wallTopLeft = Offset(currentWx * width, currentWy * height)
+                    val wallSize = Size(wall.width * width, wall.height * height)
+
+                    if (wall.isMoving) {
+                        drawRoundRect(brush = Brush.linearGradient(colors = listOf(Color.Yellow, Color(0xFFFF4500), Color.Red)), topLeft = wallTopLeft, size = wallSize, cornerRadius = CornerRadius(8f, 8f))
+                    } else {
+                        drawRoundRect(color = theme.bezelBorderColor, topLeft = wallTopLeft, size = wallSize, cornerRadius = CornerRadius(8f, 8f))
+                        drawRoundRect(color = theme.arcadeAccentColor.copy(alpha = 0.6f), topLeft = wallTopLeft, size = wallSize, cornerRadius = CornerRadius(8f, 8f), style = Stroke(width = 1.5f))
+                    }
+                }
+
+                if (gameState != "DEAD") {
+                    val ballCenter = Offset(ballX, ballY)
+                    val highlightOffset = Offset(ballCenter.x - ballRadius * 0.35f, ballCenter.y - ballRadius * 0.35f)
+                    drawCircle(
+                        brush = Brush.radialGradient(colors = listOf(Color.White, Color(0xFFD0D0D0), Color(0xFF505050), Color(0xFF202020)), center = highlightOffset, radius = ballRadius * 1.3f),
+                        radius = ballRadius, center = ballCenter
+                    )
+                } else {
+                    drawOval(brush = Brush.radialGradient(colors = listOf(Color(0xFFFF4500), Color(0xFF8B0000), Color.Transparent)), topLeft = Offset(ballX - 35f, ballY - 5f), size = Size(70f, 30f))
+                }
+            }
+
+            // Fixed Text Overlay (WON): Applied rotation directly to container Column instead of individual Text composables
+            if (gameState == "WON") {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.70f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier
+                            .padding(24.dp)
+                            .rotate(90f) // Rotates entire block cleanly with correct spacing
+                    ) {
+                        val lavaBrush = Brush.linearGradient(
+                            colors = listOf(Color.Yellow, Color(0xFFFF4500), Color.Red, Color(0xFFFF8C00)),
+                            start = Offset(0f, lavaOffset),
+                            end = Offset(300f, lavaOffset + 300f)
+                        )
+                        Text(
+                            text = winTitle,
+                            fontSize = 32.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 3.sp,
+                            style = androidx.compose.ui.text.TextStyle(brush = lavaBrush)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "STAGE $currentLevel CLEARED!",
+                            color = Color.Green,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(20.dp))
+                        Text(
+                            text = "NEXT STAGE IN $countdownSeconds...",
+                            color = theme.arcadeAccentColor,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+            }
+
+            // Fixed Text Overlay (DEAD): Applied rotation directly to container Column
+            if (gameState == "DEAD") {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.70f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier
+                            .padding(24.dp)
+                            .rotate(90f) // Rotates entire block cleanly with correct spacing
+                    ) {
+                        val lavaBrush = Brush.linearGradient(
+                            colors = listOf(Color.Yellow, Color(0xFFFF4500), Color.Red, Color(0xFFFF8C00)),
+                            start = Offset(0f, lavaOffset),
+                            end = Offset(300f, lavaOffset + 300f)
+                        )
+                        Text(
+                            text = "MELTED",
+                            fontSize = 44.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 5.sp,
+                            style = androidx.compose.ui.text.TextStyle(brush = lavaBrush)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "YOUR BALL LIQUEFIED IN THE LAVA",
+                            color = Color(0xFFFFB366),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(20.dp))
+                        Text(
+                            text = "RESTARTING IN $countdownSeconds...",
+                            color = theme.arcadeAccentColor,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        val startTime = System.nanoTime()
+        while (true) {
+            withFrameNanos { frameTime -> elapsedTime = (frameTime - startTime) / 1_000_000_000f }
+        }
+    }
+}
