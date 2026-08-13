@@ -477,11 +477,11 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
         val isVert = rng.nextBoolean()
         val baseW = if (isVert) 0.030f else 0.20f + rng.nextFloat() * 0.18f
         val baseH = if (isVert) 0.20f + rng.nextFloat() * 0.18f else 0.030f
+        val range = if (isMoving) 0.08f + rng.nextFloat() * 0.06f else 0f
 
         for (attempt in 0..40) {
-            val wx = 0.05f + rng.nextFloat() * (0.88f - baseW)
-            val wy = 0.05f + rng.nextFloat() * (0.88f - baseH)
-            val range = if (isMoving) 0.10f + rng.nextFloat() * 0.08f else 0f
+            val wx = 0.06f + range + rng.nextFloat() * (0.88f - baseW - 2f * range)
+            val wy = 0.06f + range + rng.nextFloat() * (0.88f - baseH - 2f * range)
 
             val candidate = Wall(wx, wy, baseW, baseH, isMoving, if (rng.nextBoolean()) 'H' else 'V', range, dynamicSpeed)
             val rect = candidate.getPlacementRect()
@@ -494,18 +494,19 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
         }
     }
 
-    // Increased lava / fire hazard count and guaranteed dynamic movement
     val lavaCount = (6 + level * 3).coerceAtMost(24)
     for (i in 0 until lavaCount) {
         for (attempt in 0..40) {
-            val hx = 0.08f + rng.nextFloat() * 0.82f
-            val hy = 0.08f + rng.nextFloat() * 0.82f
+            val pathR = 0.06f + rng.nextFloat() * 0.08f
+            val hx = 0.08f + pathR + rng.nextFloat() * (0.84f - 2f * pathR)
+            val hy = 0.08f + pathR + rng.nextFloat() * (0.84f - 2f * pathR)
+
             val candidate = Hazard(
                 x = hx, y = hy,
                 radius = 18f + rng.nextFloat() * 14f,
                 isMoving = true,
                 speed = dynamicSpeed * 1.2f,
-                pathRadius = 0.08f + rng.nextFloat() * 0.12f,
+                pathRadius = pathR,
                 seedOffset = rng.nextFloat() * 10f
             )
             val rect = candidate.getPlacementRect()
@@ -877,7 +878,6 @@ fun SteelBallGameScreen(
                         var nextX = ballX + velocityX / subSteps
                         var nextY = ballY + velocityY / subSteps
 
-                        // LETHAL SINGLE FIRE BOUNDARY: Touching outer edges kills you!
                         if (nextX - ballRadius < 0f || nextX + ballRadius > width ||
                             nextY - ballRadius < 0f || nextY + ballRadius > height) {
                             gameState = "DEAD"
@@ -890,8 +890,8 @@ fun SteelBallGameScreen(
                         }
 
                         for (wall in levelLayout.walls) {
-                            val currentWx = if (wall.isMoving && wall.moveAxis == 'H') wall.x + sin(elapsedTime * wall.speed) * wall.moveRange else wall.x
-                            val currentWy = if (wall.isMoving && wall.moveAxis == 'V') wall.y + cos(elapsedTime * wall.speed) * wall.moveRange else wall.y
+                            val currentWx = if (wall.isMoving && wall.moveAxis == 'H') (wall.x + sin(elapsedTime * wall.speed) * wall.moveRange).coerceIn(0.04f, 1f - wall.width - 0.04f) else wall.x
+                            val currentWy = if (wall.isMoving && wall.moveAxis == 'V') (wall.y + cos(elapsedTime * wall.speed) * wall.moveRange).coerceIn(0.04f, 1f - wall.height - 0.04f) else wall.y
                             val wx = currentWx * width; val wy = currentWy * height
                             val ww = wall.width * width; val wh = wall.height * height
 
@@ -959,8 +959,8 @@ fun SteelBallGameScreen(
                     }
 
                     for (hazard in levelLayout.hazards) {
-                        val hx = (if (hazard.isMoving) hazard.x + sin(elapsedTime * hazard.speed + hazard.seedOffset) * hazard.pathRadius else hazard.x) * width
-                        val hy = (if (hazard.isMoving) hazard.y + cos(elapsedTime * (hazard.speed * 0.8f) + hazard.seedOffset) * hazard.pathRadius else hazard.y) * height
+                        val hx = (if (hazard.isMoving) (hazard.x + sin(elapsedTime * hazard.speed + hazard.seedOffset) * hazard.pathRadius).coerceIn(0.05f, 0.95f) else hazard.x) * width
+                        val hy = (if (hazard.isMoving) (hazard.y + cos(elapsedTime * (hazard.speed * 0.8f) + hazard.seedOffset) * hazard.pathRadius).coerceIn(0.05f, 0.95f) else hazard.y) * height
                         if (hypot(ballX - hx, ballY - hy) < ballRadius + hazard.radius * 0.70f) {
                             gameState = "DEAD"
                             try {
@@ -1060,8 +1060,8 @@ fun SteelBallGameScreen(
 
                 // Render Moving Fire Balls (Hazards)
                 for (hazard in levelLayout.hazards) {
-                    val hx = (hazard.x + sin(elapsedTime * hazard.speed + hazard.seedOffset) * hazard.pathRadius) * width
-                    val hy = (hazard.y + cos(elapsedTime * (hazard.speed * 0.8f) + hazard.seedOffset) * hazard.pathRadius) * height
+                    val hx = (if (hazard.isMoving) (hazard.x + sin(elapsedTime * hazard.speed + hazard.seedOffset) * hazard.pathRadius).coerceIn(0.05f, 0.95f) else hazard.x) * width
+                    val hy = (if (hazard.isMoving) (hazard.y + cos(elapsedTime * (hazard.speed * 0.8f) + hazard.seedOffset) * hazard.pathRadius).coerceIn(0.05f, 0.95f) else hazard.y) * height
                     val hCenter = Offset(hx, hy)
 
                     drawCircle(color = Color(0xFFFF3300).copy(alpha = 0.45f), radius = hazard.radius * 1.4f, center = hCenter)
@@ -1078,8 +1078,8 @@ fun SteelBallGameScreen(
 
                 // Render Walls
                 for (wall in levelLayout.walls) {
-                    val currentWx = if (wall.isMoving && wall.moveAxis == 'H') wall.x + sin(elapsedTime * wall.speed) * wall.moveRange else wall.x
-                    val currentWy = if (wall.isMoving && wall.moveAxis == 'V') wall.y + cos(elapsedTime * wall.speed) * wall.moveRange else wall.y
+                    val currentWx = if (wall.isMoving && wall.moveAxis == 'H') (wall.x + sin(elapsedTime * wall.speed) * wall.moveRange).coerceIn(0.04f, 1f - wall.width - 0.04f) else wall.x
+                    val currentWy = if (wall.isMoving && wall.moveAxis == 'V') (wall.y + cos(elapsedTime * wall.speed) * wall.moveRange).coerceIn(0.04f, 1f - wall.height - 0.04f) else wall.y
                     val wallTopLeft = Offset(currentWx * width, currentWy * height)
                     val wallSize = Size(wall.width * width, wall.height * height)
 
