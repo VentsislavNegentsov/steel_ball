@@ -39,9 +39,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -146,9 +148,8 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 }
 
 // =====================================================================================
-// PROCEDURAL ARCADE MUSIC ENGINE
-// Layered synthesis: lead melody + sub-bass + percussive kick/hat, mixed per sample.
-// Ten distinct "chiptune" modes cycle by level, each with its own scale, tempo & timbre.
+// ENHANCED MULTI-VOICE POLYPHONIC RETRO MUSIC ENGINE
+// Features 4-channel synthesis: Lead Pulse + Polyphonic Arp/Harmony + FM Sub-Bass + Percussion
 // =====================================================================================
 
 class ArcadeMusicPlayer {
@@ -191,119 +192,61 @@ class ArcadeMusicPlayer {
             val rng = Random(42)
             var stepCounter = 0
 
+            // Multi-channel retro scales (Frequency sequences)
+            val scales = listOf(
+                listOf(261.63, 293.66, 329.63, 392.00, 440.00, 523.25), // C Major Chiptune
+                listOf(220.00, 261.63, 293.66, 329.63, 392.00, 440.00), // A Minor Synth
+                listOf(196.00, 220.00, 246.94, 293.66, 329.63, 392.00), // G Pentatonic
+                listOf(174.61, 220.00, 261.63, 329.63, 349.23, 440.00), // F Lydian Dynamic
+                listOf(146.83, 174.61, 196.00, 220.00, 261.63, 293.66)  // D Minor Dark
+            )
+
             while (isPlaying) {
                 val lvl = currentLevel
-                val mode = (lvl - 1) % 10
-                // Tempo/intensity creeps up with level for a rising sense of urgency.
-                val tempoBoost = (1f - (lvl % 10) * 0.015f).coerceIn(0.82f, 1f)
+                val scale = scales[(lvl - 1) % scales.size]
+                val tempoBoost = (1f - (lvl % 10) * 0.012f).coerceIn(0.75f, 1f)
+                val baseDuration = (sampleRate / 8 * tempoBoost).toInt()
 
-                val (noteDurationSamplesRaw, rootFreq, waveValue) = when (mode) {
-                    0 -> {
-                        val scale = listOf(523.25, 587.33, 659.25, 783.99, 880.00)
-                        val freq = scale[stepCounter % scale.size]
-                        val subBass = scale[(stepCounter / 2) % scale.size] / 2.0
-                        Triple(sampleRate / 8, freq) { t: Double, _: Int ->
-                            val sq = if (sin(2.0 * Math.PI * freq * t) > 0.0) 0.5 else -0.5
-                            val tri = asin(sin(2.0 * Math.PI * subBass * t)) / (Math.PI / 2.0)
-                            (sq * 0.6 + tri * 0.4)
-                        }
-                    }
-                    1 -> {
-                        val scale = listOf(440.00, 466.16, 523.25, 587.33, 659.25, 698.46)
-                        val freq = scale[(stepCounter * 2) % scale.size]
-                        val isSnare = stepCounter % 4 == 2
-                        Triple(sampleRate / 10, freq) { t: Double, _: Int ->
-                            val saw = 2.0 * (freq * t - floor(freq * t + 0.5))
-                            val noise = if (isSnare) (rng.nextDouble() * 2.0 - 1.0) * 0.5 else 0.0
-                            (saw * 0.5 + noise * 0.5)
-                        }
-                    }
-                    2 -> {
-                        val scale = listOf(587.33, 698.46, 880.00, 1046.50, 1174.66)
-                        val freq = scale[(stepCounter * 3) % scale.size]
-                        Triple(sampleRate / 14, freq) { t: Double, _: Int ->
-                            if (sin(2.0 * Math.PI * freq * t) > 0.2) 0.6 else -0.6
-                        }
-                    }
-                    3 -> {
-                        val scale = listOf(220.00, 233.08, 277.18, 311.13, 349.23)
-                        val freq = scale[stepCounter % scale.size]
-                        Triple(sampleRate / 6, freq) { t: Double, _: Int ->
-                            val sub = sin(2.0 * Math.PI * (freq / 2.0) * t)
-                            val growl = tan(sin(2.0 * Math.PI * freq * t)).coerceIn(-1.0, 1.0)
-                            (sub * 0.6 + growl * 0.4)
-                        }
-                    }
-                    4 -> {
-                        val freq = 300.0 + (stepCounter * 45.0) % 900.0
-                        Triple(sampleRate / 12, freq) { t: Double, i: Int ->
-                            sin(2.0 * Math.PI * freq * t * (1.0 + i * 0.0001)) * 0.5
-                        }
-                    }
-                    5 -> {
-                        val scale = listOf(329.63, 392.00, 440.00, 523.25)
-                        val freq = scale[stepCounter % scale.size]
-                        Triple(sampleRate / 7, freq) { t: Double, _: Int ->
-                            (sin(2.0 * Math.PI * freq * t) * 0.5 + sin(2.0 * Math.PI * (freq * 1.5) * t) * 0.3)
-                        }
-                    }
-                    6 -> {
-                        val freq = 880.0
-                        Triple(sampleRate / 16, freq) { t: Double, _: Int ->
-                            if ((t * freq) % 1.0 < 0.5) 0.7 else -0.7
-                        }
-                    }
-                    7 -> {
-                        val scale = listOf(110.00, 123.47, 130.81, 146.83)
-                        val freq = scale[stepCounter % scale.size]
-                        Triple(sampleRate / 5, freq) { t: Double, _: Int ->
-                            val sq = if (sin(2.0 * Math.PI * freq * t) > 0.0) 0.7 else -0.7
-                            sq * 0.6
-                        }
-                    }
-                    8 -> {
-                        val scale = listOf(1046.50, 1174.66, 1318.51, 1396.91, 1567.98)
-                        val freq = scale[stepCounter % scale.size]
-                        Triple(sampleRate / 18, freq) { t: Double, _: Int ->
-                            if (sin(2.0 * Math.PI * freq * t) > 0.0) 0.5 else -0.5
-                        }
-                    }
-                    else -> {
-                        val scale = listOf(164.81, 174.61, 196.00, 220.00)
-                        val freq = scale[stepCounter % scale.size]
-                        Triple(sampleRate / 9, freq) { t: Double, _: Int ->
-                            val saw1 = 2.0 * (freq * t - floor(freq * t + 0.5))
-                            val saw2 = 2.0 * ((freq * 1.01) * t - floor((freq * 1.01) * t + 0.5))
-                            ((saw1 + saw2) * 0.3)
-                        }
-                    }
-                }
+                // Polyphonic voices selection
+                val leadFreq = scale[stepCounter % scale.size]
+                val arpFreq = scale[(stepCounter * 2 + 1) % scale.size] * 1.5
+                val bassFreq = scale[(stepCounter / 2) % scale.size] / 2.0
 
-                val noteDurationSamples = (noteDurationSamplesRaw * tempoBoost).toInt().coerceAtLeast(64)
-                val kickHit = stepCounter % 4 == 0
-                val hatHit = stepCounter % 2 == 1
+                val isKick = stepCounter % 4 == 0
+                val isSnare = stepCounter % 4 == 2
+                val isHat = stepCounter % 2 == 1
 
                 stepCounter++
-                val buffer = ShortArray(noteDurationSamples)
+                val buffer = ShortArray(baseDuration)
 
-                for (i in 0 until noteDurationSamples) {
+                for (i in 0 until baseDuration) {
                     val t = i.toDouble() / sampleRate
-                    val envelope = sin((i.toDouble() / noteDurationSamples) * Math.PI)
+                    val env = sin((i.toDouble() / baseDuration) * Math.PI)
 
-                    // Lead melody voice (per-mode timbre defined above)
-                    val lead = waveValue(t, i) * envelope
+                    // Channel 1: Lead Pulse Wave (duty cycle 25% to 50%)
+                    val pulseDuty = 0.25 + 0.25 * sin(2.0 * Math.PI * 0.5 * t)
+                    val leadPhase = (leadFreq * t) % 1.0
+                    val leadWave = if (leadPhase < pulseDuty) 0.5 else -0.5
 
-                    // Sub-bass voice, one octave below the root note of the current step
-                    val bass = sin(2.0 * Math.PI * (rootFreq / 2.0) * t) * envelope
+                    // Channel 2: Arpeggiator / Harmony (Sawtooth / Triangle blend)
+                    val arpSaw = 2.0 * (arpFreq * t - floor(arpFreq * t + 0.5))
+                    val arpTri = asin(sin(2.0 * Math.PI * arpFreq * t)) / (Math.PI / 2.0)
+                    val harmonyWave = (arpSaw * 0.4 + arpTri * 0.6) * 0.35
 
-                    // Percussive kick: short decaying low thump on strong beats
-                    val kick = if (kickHit) sin(2.0 * Math.PI * 62.0 * t) * exp(-i / 700.0) else 0.0
+                    // Channel 3: Deep Sub-Bass (FM Modulated Sine Wave)
+                    val bassMod = sin(2.0 * Math.PI * (bassFreq * 0.5) * t) * 2.0
+                    val bassWave = sin(2.0 * Math.PI * bassFreq * t + bassMod) * 0.45
 
-                    // Percussive hat: short decaying noise burst on off-beats
-                    val hat = if (hatHit && i < 500) (rng.nextDouble() * 2.0 - 1.0) * exp(-i / 120.0) else 0.0
+                    // Channel 4: Percussion Engine
+                    val kick = if (isKick) sin(2.0 * Math.PI * (70.0 * exp(-i / 500.0)) * t) * exp(-i / 800.0) else 0.0
+                    val snare = if (isSnare) (rng.nextDouble() * 2.0 - 1.0) * exp(-i / 600.0) else 0.0
+                    val hat = if (isHat && i < 400) (rng.nextDouble() * 2.0 - 1.0) * exp(-i / 150.0) * 0.4 else 0.0
 
-                    val mixed = lead * 0.52 + bass * 0.30 + kick * 0.34 + hat * 0.18
-                    buffer[i] = (mixed * 3800.0).toInt().coerceIn(-32768, 32767).toShort()
+                    val drums = (kick * 0.5 + snare * 0.3 + hat * 0.2)
+
+                    // Master Polyphonic Mix
+                    val mixed = (leadWave * 0.35 + harmonyWave + bassWave + drums) * env
+                    buffer[i] = (mixed * 4200.0).toInt().coerceIn(-32768, 32767).toShort()
                 }
 
                 try {
@@ -375,13 +318,13 @@ data class PlacementRect(val minX: Float, val minY: Float, val maxX: Float, val 
 
 data class Wall(
     val x: Float, val y: Float, val width: Float, val height: Float,
-    val isMoving: Boolean = false, val moveAxis: Char = 'H', val moveRange: Float = 0.12f, val speed: Float = 0.8f
+    val isMoving: Boolean = false, val moveAxis: Char = 'H', val moveRange: Float = 0.5f, val speed: Float = 0.8f
 ) {
     fun getPlacementRect(): PlacementRect {
-        val sweepMinX = x - if (isMoving && moveAxis == 'H') moveRange else 0f
-        val sweepMaxX = x + width + if (isMoving && moveAxis == 'H') moveRange else 0f
-        val sweepMinY = y - if (isMoving && moveAxis == 'V') moveRange else 0f
-        val sweepMaxY = y + height + if (isMoving && moveAxis == 'V') moveRange else 0f
+        val sweepMinX = if (isMoving && moveAxis == 'H') 0f else x
+        val sweepMaxX = if (isMoving && moveAxis == 'H') 1f else x + width
+        val sweepMinY = if (isMoving && moveAxis == 'V') 0f else y
+        val sweepMaxY = if (isMoving && moveAxis == 'V') 1f else y + height
         return PlacementRect(sweepMinX, sweepMinY, sweepMaxX, sweepMaxY)
     }
 }
@@ -421,12 +364,10 @@ data class IcePatch(val x: Float, val y: Float, val width: Float, val height: Fl
     fun getPlacementRect(): PlacementRect = PlacementRect(x, y, x + width, y + height)
 }
 
-// NEW: static spike cluster — instant death on contact, purely static (no BFS blocking).
 data class SpikeTrap(val x: Float, val y: Float, val size: Float) {
     fun getPlacementRect(): PlacementRect = PlacementRect(x - 0.03f, y - 0.03f, x + 0.03f, y + 0.03f)
 }
 
-// NEW: rectangular zone that continuously pushes the ball while inside it.
 data class WindZone(
     val x: Float, val y: Float, val width: Float, val height: Float,
     val forceX: Float, val forceY: Float
@@ -434,7 +375,6 @@ data class WindZone(
     fun getPlacementRect(): PlacementRect = PlacementRect(x, y, x + width, y + height)
 }
 
-// NEW: a rotating beam (like a lighthouse sweep) pivoting around its center — instant death.
 data class RotatingBeam(
     val cx: Float, val cy: Float, val length: Float, val speed: Float, val phase: Float
 ) {
@@ -465,15 +405,18 @@ fun isLevelPassable(layout: LevelLayout): Boolean {
     val grid = Array(gridSize) { BooleanArray(gridSize) { true } }
     val ballMargin = 0.035f
 
+    // Static wall placement check
     for (wall in layout.walls) {
-        val rect = wall.getPlacementRect()
-        val startGx = ((rect.minX - ballMargin) * gridSize).toInt().coerceIn(0, gridSize - 1)
-        val endGx = ((rect.maxX + ballMargin) * gridSize).toInt().coerceIn(0, gridSize - 1)
-        val startGy = ((rect.minY - ballMargin) * gridSize).toInt().coerceIn(0, gridSize - 1)
-        val endGy = ((rect.maxY + ballMargin) * gridSize).toInt().coerceIn(0, gridSize - 1)
+        if (!wall.isMoving) {
+            val rect = wall.getPlacementRect()
+            val startGx = ((rect.minX - ballMargin) * gridSize).toInt().coerceIn(0, gridSize - 1)
+            val endGx = ((rect.maxX + ballMargin) * gridSize).toInt().coerceIn(0, gridSize - 1)
+            val startGy = ((rect.minY - ballMargin) * gridSize).toInt().coerceIn(0, gridSize - 1)
+            val endGy = ((rect.maxY + ballMargin) * gridSize).toInt().coerceIn(0, gridSize - 1)
 
-        for (gx in startGx..endGx) {
-            for (gy in startGy..endGy) { grid[gx][gy] = false }
+            for (gx in startGx..endGx) {
+                for (gy in startGy..endGy) { grid[gx][gy] = false }
+            }
         }
     }
 
@@ -509,8 +452,7 @@ fun isLevelPassable(layout: LevelLayout): Boolean {
 }
 
 // =====================================================================================
-// PROCEDURAL LEVEL GENERATOR — difficulty ramps continuously with level number:
-// more obstacles, faster movers, a shrinking goal, and new object types unlock in tiers.
+// PROCEDURAL LEVEL GENERATOR
 // =====================================================================================
 
 fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
@@ -538,7 +480,6 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
         return occupied.none { it.overlaps(rect, padding) }
     }
 
-    // Goal gets further from start (up to a cap) and shrinks slightly as levels progress.
     val minGoalDistance = (0.50f + (level * 0.012f)).coerceAtMost(0.72f)
     val goalRadius = (32f - level * 0.55f).coerceAtLeast(19f)
 
@@ -560,7 +501,6 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
         }
     }
 
-    // Portals appear from level 1 onward with rising probability.
     if (level >= 2 || rng.nextFloat() < 0.8f) {
         for (attempt in 0..100) {
             val p1x = 0.10f + rng.nextFloat() * 0.38f; val p1y = 0.10f + rng.nextFloat() * 0.38f
@@ -575,19 +515,18 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
         }
     }
 
-    val totalWalls = (4 + level * 2).coerceAtMost(16)
+    val totalWalls = (4 + level * 2).coerceAtMost(14)
     for (w in 0 until totalWalls) {
         val isMoving = rng.nextFloat() < (0.35f + level * 0.05f).coerceAtMost(0.75f)
         val isVert = rng.nextBoolean()
-        val baseW = if (isVert) 0.030f else 0.20f + rng.nextFloat() * 0.18f
-        val baseH = if (isVert) 0.20f + rng.nextFloat() * 0.18f else 0.030f
-        val range = if (isMoving) 0.08f + rng.nextFloat() * 0.06f else 0f
+        val baseW = if (isVert) 0.035f else 0.20f + rng.nextFloat() * 0.18f
+        val baseH = if (isVert) 0.20f + rng.nextFloat() * 0.18f else 0.035f
 
         for (attempt in 0..40) {
-            val wx = 0.06f + range + rng.nextFloat() * (0.88f - baseW - 2f * range)
-            val wy = 0.06f + range + rng.nextFloat() * (0.88f - baseH - 2f * range)
+            val wx = 0.06f + rng.nextFloat() * (0.88f - baseW)
+            val wy = 0.06f + rng.nextFloat() * (0.88f - baseH)
 
-            val candidate = Wall(wx, wy, baseW, baseH, isMoving, if (rng.nextBoolean()) 'H' else 'V', range, dynamicSpeed)
+            val candidate = Wall(wx, wy, baseW, baseH, isMoving, if (rng.nextBoolean()) 'H' else 'V', 0.5f, dynamicSpeed)
             val rect = candidate.getPlacementRect()
 
             if (canPlace(rect, 0.01f)) {
@@ -598,7 +537,7 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
         }
     }
 
-    val lavaCount = (5 + level * 2).coerceAtMost(20)
+    val lavaCount = (5 + level * 2).coerceAtMost(18)
     for (i in 0 until lavaCount) {
         for (attempt in 0..40) {
             val pathR = 0.06f + rng.nextFloat() * 0.08f
@@ -622,7 +561,7 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
         }
     }
 
-    val bhCount = (2 + level).coerceAtMost(7)
+    val bhCount = (2 + level).coerceAtMost(6)
     val holeStrength = (0.65f + (level - 1) * 0.08f).coerceAtMost(1.1f)
     for (i in 0 until bhCount) {
         for (attempt in 0..40) {
@@ -638,7 +577,7 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
         }
     }
 
-    val bumperCount = (2 + level).coerceAtMost(7)
+    val bumperCount = (2 + level).coerceAtMost(6)
     for (i in 0 until bumperCount) {
         for (attempt in 0..40) {
             val bx = 0.10f + rng.nextFloat() * 0.80f
@@ -653,7 +592,7 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
         }
     }
 
-    val iceCount = (2 + level).coerceAtMost(6)
+    val iceCount = (2 + level).coerceAtMost(5)
     for (i in 0 until iceCount) {
         for (attempt in 0..40) {
             val ix = 0.10f + rng.nextFloat() * 0.60f
@@ -684,8 +623,7 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
         }
     }
 
-    // Spike traps unlock immediately — static hazards that reward careful navigation.
-    val spikeCount = (1 + level / 2).coerceAtMost(10)
+    val spikeCount = (1 + level / 2).coerceAtMost(8)
     for (i in 0 until spikeCount) {
         for (attempt in 0..40) {
             val sx = 0.10f + rng.nextFloat() * 0.80f
@@ -700,7 +638,6 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
         }
     }
 
-    // Wind zones unlock at level 2+: constant force fields that fight the player's tilt.
     if (level >= 2) {
         val windCount = (level / 2).coerceAtMost(4)
         for (i in 0 until windCount) {
@@ -722,7 +659,6 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
         }
     }
 
-    // Rotating beams unlock at level 3+: sweeping death-rays for advanced stages.
     if (level >= 3) {
         val beamCount = (1 + (level - 3) / 2).coerceAtMost(4)
         for (i in 0 until beamCount) {
@@ -754,7 +690,6 @@ fun generateRandomizedAILevel(level: Int): LevelLayout {
     }
 }
 
-// Closest distance from a point to a line segment — used for rotating-beam collision.
 fun pointToSegmentDistance(px: Float, py: Float, ax: Float, ay: Float, bx: Float, by: Float): Float {
     val abx = bx - ax; val aby = by - ay
     val apx = px - ax; val apy = py - ay
@@ -794,9 +729,7 @@ fun SteelBallGameScreen(
     var winTitle by remember { mutableStateOf(" PERFECT ") }
     var countdownSeconds by remember { mutableIntStateOf(3) }
 
-    // Trail of recent ball positions for a glowing motion trail effect.
     val trail = remember { mutableStateListOf<Offset>() }
-    // Screen shake magnitude, decays after a death impact.
     var shakeMagnitude by remember { mutableFloatStateOf(0f) }
 
     var stageStartTime by remember { mutableFloatStateOf(0f) }
@@ -862,9 +795,7 @@ fun SteelBallGameScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // ---------------------------------------------------------------------------
-        // Header: Reset / Stage selector + difficulty badge / Exit
-        // ---------------------------------------------------------------------------
+        // Header Controls
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -964,9 +895,7 @@ fun SteelBallGameScreen(
             }
         }
 
-        // ---------------------------------------------------------------------------
-        // Game viewport
-        // ---------------------------------------------------------------------------
+        // Viewport Box
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1058,7 +987,6 @@ fun SteelBallGameScreen(
                             }
                         }
 
-                        // Wind zones apply a continuous force while the ball is inside them.
                         for (wind in levelLayout.windZones) {
                             val wx = wind.x * width; val wy = wind.y * height
                             val ww = wind.width * width; val wh = wind.height * height
@@ -1083,9 +1011,15 @@ fun SteelBallGameScreen(
                             break
                         }
 
+                        // Wall Collisions (Full frame edge-to-edge calculation for moving walls)
                         for (wall in levelLayout.walls) {
-                            val currentWx = if (wall.isMoving && wall.moveAxis == 'H') (wall.x + sin(elapsedTime * wall.speed) * wall.moveRange).coerceIn(0.04f, 1f - wall.width - 0.04f) else wall.x
-                            val currentWy = if (wall.isMoving && wall.moveAxis == 'V') (wall.y + cos(elapsedTime * wall.speed) * wall.moveRange).coerceIn(0.04f, 1f - wall.height - 0.04f) else wall.y
+                            val currentWx = if (wall.isMoving && wall.moveAxis == 'H') {
+                                (0.5f + 0.5f * sin(elapsedTime * wall.speed)) * (1f - wall.width)
+                            } else wall.x
+                            val currentWy = if (wall.isMoving && wall.moveAxis == 'V') {
+                                (0.5f + 0.5f * cos(elapsedTime * wall.speed)) * (1f - wall.height)
+                            } else wall.y
+
                             val wx = currentWx * width; val wy = currentWy * height
                             val ww = wall.width * width; val wh = wall.height * height
 
@@ -1153,11 +1087,11 @@ fun SteelBallGameScreen(
                         ballX = nextX; ballY = nextY
                     }
 
-                    // Fireball hazard collisions
+                    // Sharp Mines Hazard Collisions
                     for (hazard in levelLayout.hazards) {
                         val hx = (if (hazard.isMoving) (hazard.x + sin(elapsedTime * hazard.speed + hazard.seedOffset) * hazard.pathRadius).coerceIn(0.05f, 0.95f) else hazard.x) * width
                         val hy = (if (hazard.isMoving) (hazard.y + cos(elapsedTime * (hazard.speed * 0.8f) + hazard.seedOffset) * hazard.pathRadius).coerceIn(0.05f, 0.95f) else hazard.y) * height
-                        if (hypot(ballX - hx, ballY - hy) < ballRadius + hazard.radius * 0.70f) {
+                        if (hypot(ballX - hx, ballY - hy) < ballRadius + hazard.radius * 0.85f) {
                             gameState = "DEAD"
                             shakeMagnitude = 14f
                             try {
@@ -1168,7 +1102,6 @@ fun SteelBallGameScreen(
                         }
                     }
 
-                    // Static spike trap collisions
                     for (spike in levelLayout.spikes) {
                         val sx = spike.x * width; val sy = spike.y * height
                         if (hypot(ballX - sx, ballY - sy) < ballRadius + spike.size * 0.55f) {
@@ -1182,7 +1115,6 @@ fun SteelBallGameScreen(
                         }
                     }
 
-                    // Rotating beam collisions
                     for (beam in levelLayout.beams) {
                         val angle = elapsedTime * beam.speed + beam.phase
                         val bcx = beam.cx * width; val bcy = beam.cy * height
@@ -1219,70 +1151,110 @@ fun SteelBallGameScreen(
                         } catch (_: Exception) {}
                     }
 
-                    // Update the motion trail with the current ball position.
                     trail.add(Offset(ballX, ballY))
                     while (trail.size > 14) trail.removeAt(0)
                 }
 
-                // Apply screen-shake jitter to the whole draw pass.
                 val shakeX = if (shakeMagnitude > 0.3f) (Random.nextFloat() - 0.5f) * shakeMagnitude else 0f
                 val shakeY = if (shakeMagnitude > 0.3f) (Random.nextFloat() - 0.5f) * shakeMagnitude else 0f
                 translate(shakeX, shakeY) {
 
                     // ---------------------------------------------------------------
-                    // GENERATED SYNTHWAVE BACKGROUND: gradient sky + receding grid + stars
+                    // FULL SCREEN DYNAMIC WARP BACKGROUND (Changes Style Per Level)
+                    // Spans the entirety of the display canvas (Full Screen)
                     // ---------------------------------------------------------------
                     drawRect(
                         brush = Brush.verticalGradient(colors = listOf(theme.skyTop, theme.skyBottom)),
                         topLeft = Offset.Zero, size = Size(width, height)
                     )
 
-                    // Twinkling starfield, deterministic per level so it feels designed.
-                    val starRng = Random(currentLevel * 991L)
-                    repeat(46) {
-                        val sx = starRng.nextFloat() * width
-                        val sy = starRng.nextFloat() * height * 0.6f
-                        val twinkle = 0.35f + 0.35f * ((sin(elapsedTime * 2f + sx * 0.05f) + 1f) / 2f)
-                        drawCircle(color = Color.White.copy(alpha = twinkle * 0.6f), radius = 1.6f, center = Offset(sx, sy))
+                    val bgStyleMode = (currentLevel - 1) % 3
+                    when (bgStyleMode) {
+                        0 -> { // HYPERDRIVE RADIAL WARP TUNNEL
+                            val centerX = width / 2f
+                            val centerY = height / 2f
+                            val rayCount = 18
+                            val speed = (elapsedTime * 120f) % 80f
+
+                            for (r in 0 until rayCount) {
+                                val angle = (r * 360f / rayCount) * (Math.PI / 180f).toFloat()
+                                val cosA = cos(angle)
+                                val sinA = sin(angle)
+                                var distance = speed
+                                while (distance < max(width, height)) {
+                                    val start = Offset(centerX + cosA * distance, centerY + sinA * distance)
+                                    val end = Offset(centerX + cosA * (distance + 25f), centerY + sinA * (distance + 25f))
+                                    val alpha = (distance / max(width, height)).coerceIn(0.1f, 0.6f)
+                                    drawLine(
+                                        color = theme.gridLineColor.copy(alpha = alpha),
+                                        start = start, end = end, strokeWidth = 2f
+                                    )
+                                    distance += 70f
+                                }
+                            }
+                        }
+                        1 -> { // FULL-SCREEN PERSPECTIVE WARP GRID
+                            val scrollY = (elapsedTime * 60f) % 40f
+                            var gy = scrollY
+                            while (gy < height) {
+                                drawLine(
+                                    color = theme.gridLineColor.copy(alpha = 0.22f),
+                                    start = Offset(0f, gy), end = Offset(width, gy), strokeWidth = 1.5f
+                                )
+                                gy += 40f
+                            }
+                            var gx = 0f
+                            while (gx < width) {
+                                drawLine(
+                                    color = theme.gridLineColor.copy(alpha = 0.15f),
+                                    start = Offset(gx, 0f), end = Offset(gx, height), strokeWidth = 1.2f
+                                )
+                                gx += 40f
+                            }
+                        }
+                        else -> { // HIGH-SPEED VECTOR SPEED LINES
+                            val speed = (elapsedTime * 300f) % width
+                            for (line in 0..12) {
+                                val yPos = (height / 12) * line + (sin(elapsedTime + line) * 20f)
+                                val startX = (speed + line * 60f) % width
+                                drawLine(
+                                    color = theme.arcadeAccentColor.copy(alpha = 0.3f),
+                                    start = Offset(startX, yPos),
+                                    end = Offset((startX + 80f) % width, yPos),
+                                    strokeWidth = 2.5f
+                                )
+                            }
+                        }
                     }
 
-                    // Receding horizon grid, scrolling gently for a sense of motion.
-                    val horizonY = height * 0.62f
-                    val scroll = (elapsedTime * 40f) % 40f
-                    var gy = horizonY
-                    var spacing = 14f
-                    while (gy < height) {
-                        val alpha = (1f - (gy - horizonY) / (height - horizonY)) * 0.35f
-                        drawLine(
-                            color = theme.gridLineColor.copy(alpha = alpha.coerceIn(0f, 0.35f)),
-                            start = Offset(0f, gy), end = Offset(width, gy), strokeWidth = 1.4f
-                        )
-                        gy += spacing
-                        spacing *= 1.18f
+                    // Twinkling Starfield Across Full Viewport
+                    val starRng = Random(currentLevel * 991L)
+                    repeat(55) {
+                        val sx = starRng.nextFloat() * width
+                        val sy = starRng.nextFloat() * height
+                        val twinkle = 0.35f + 0.35f * ((sin(elapsedTime * 2.5f + sx * 0.05f) + 1f) / 2f)
+                        drawCircle(color = Color.White.copy(alpha = twinkle * 0.7f), radius = 1.8f, center = Offset(sx, sy))
                     }
-                    val vanishX = width / 2f
-                    for (col in -6..6) {
-                        val topX = vanishX + col * 10f
-                        val bottomX = vanishX + col * (width / 10f) + scroll * (col * 0.02f)
-                        drawLine(
-                            color = theme.gridLineColor.copy(alpha = 0.16f),
-                            start = Offset(topX, horizonY), end = Offset(bottomX, height), strokeWidth = 1.2f
-                        )
-                    }
-                    drawLine(
-                        color = theme.arcadeAccentColor.copy(alpha = 0.45f),
-                        start = Offset(0f, horizonY), end = Offset(width, horizonY), strokeWidth = 2f
-                    )
 
                     // ---------------------------------------------------------------
-                    // Wormhole Portals
+                    // REALISTIC ITEM: WORMHOLE TELEPORT / PORTALS
                     // ---------------------------------------------------------------
                     levelLayout.portal?.let { p ->
                         val p1 = Offset(p.x1 * width, p.y1 * height)
                         val p2 = Offset(p.x2 * width, p.y2 * height)
 
-                        drawCircle(color = Color(0xFFFF00CC), radius = p.radius, center = p1, style = Stroke(width = 4f))
-                        drawCircle(color = Color(0xFF00FFFF), radius = p.radius, center = p2, style = Stroke(width = 4f))
+                        for (portalPos in listOf(p1, p2)) {
+                            // Swirling Vortex Arc Rings
+                            rotate(degrees = elapsedTime * 120f, pivot = portalPos) {
+                                drawCircle(
+                                    brush = Brush.sweepGradient(colors = listOf(Color(0xFFFF00CC), Color(0xFF00FFFF), Color(0xFFFF00CC)), center = portalPos),
+                                    radius = p.radius * 1.3f, center = portalPos, style = Stroke(width = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(15f, 10f)))
+                                )
+                            }
+                            // Deep Space Void Center
+                            drawCircle(brush = Brush.radialGradient(colors = listOf(Color.Black, Color(0xFF20003B)), center = portalPos, radius = p.radius), radius = p.radius, center = portalPos)
+                            drawCircle(color = Color.White, radius = p.radius * 0.3f, center = portalPos)
+                        }
                     }
 
                     // Start Zone & Goal Hole
@@ -1293,9 +1265,7 @@ fun SteelBallGameScreen(
                     drawCircle(brush = Brush.radialGradient(colors = listOf(theme.fluidCenterColor, theme.caseOuterBg), center = goalPos, radius = goalRadius * goalPulse), radius = goalRadius * goalPulse, center = goalPos)
                     drawCircle(color = theme.fluidCenterColor, radius = goalRadius * goalPulse, center = goalPos, style = Stroke(width = 3f))
 
-                    // ---------------------------------------------------------------
                     // Wind zones
-                    // ---------------------------------------------------------------
                     for (wind in levelLayout.windZones) {
                         val wx = wind.x * width; val wy = wind.y * height
                         val ww = wind.width * width; val wh = wind.height * height
@@ -1315,9 +1285,7 @@ fun SteelBallGameScreen(
                         drawLine(color = theme.arcadeAccentColor, start = Offset(cx - cos(angle) * arrowLen, cy - sin(angle) * arrowLen), end = Offset(ax, ay), strokeWidth = 2.5f)
                     }
 
-                    // ---------------------------------------------------------------
-                    // Spike traps
-                    // ---------------------------------------------------------------
+                    // Static Spike Traps
                     for (spike in levelLayout.spikes) {
                         val sx = spike.x * width; val sy = spike.y * height
                         drawCircle(color = Color(0xFFFF1744).copy(alpha = 0.3f), radius = spike.size * 0.9f, center = Offset(sx, sy))
@@ -1328,7 +1296,7 @@ fun SteelBallGameScreen(
                             val baseAng1 = ang + 0.5f; val baseAng2 = ang - 0.5f
                             val b1x = sx + cos(baseAng1) * spike.size * 0.35f; val b1y = sy + sin(baseAng1) * spike.size * 0.35f
                             val b2x = sx + cos(baseAng2) * spike.size * 0.35f; val b2y = sy + sin(baseAng2) * spike.size * 0.35f
-                            val path = androidx.compose.ui.graphics.Path().apply {
+                            val path = Path().apply {
                                 moveTo(tipX, tipY); lineTo(b1x, b1y); lineTo(b2x, b2y); close()
                             }
                             drawPath(path, color = Color(0xFFB71C1C))
@@ -1337,9 +1305,7 @@ fun SteelBallGameScreen(
                         drawCircle(color = Color(0xFF1A1A1A), radius = spike.size * 0.3f, center = Offset(sx, sy))
                     }
 
-                    // ---------------------------------------------------------------
-                    // Rotating beams
-                    // ---------------------------------------------------------------
+                    // Rotating Beams
                     for (beam in levelLayout.beams) {
                         val angle = elapsedTime * beam.speed + beam.phase
                         val bcx = beam.cx * width; val bcy = beam.cy * height
@@ -1356,45 +1322,65 @@ fun SteelBallGameScreen(
                     }
 
                     // ---------------------------------------------------------------
-                    // Pinball Bumpers
+                    // REALISTIC ITEM: PINBALL BUMPERS
                     // ---------------------------------------------------------------
                     for (bumper in levelLayout.bumpers) {
                         val bx = bumper.x * width; val by = bumper.y * height
-                        drawCircle(color = Color(0xFFFFCC00).copy(alpha = 0.35f), radius = bumper.radius * 1.2f, center = Offset(bx, by))
-                        drawCircle(color = Color(0xFFFFCC00), radius = bumper.radius, center = Offset(bx, by), style = Stroke(width = 3.5f))
+
+                        // Chrome Outer Ring & Spring Coils
+                        drawCircle(brush = Brush.radialGradient(colors = listOf(Color.White, Color.Gray, Color.DarkGray), center = Offset(bx - 5f, by - 5f), radius = bumper.radius * 1.2f), radius = bumper.radius * 1.15f, center = Offset(bx, by))
+                        drawCircle(color = Color(0xFF222222), radius = bumper.radius * 0.85f, center = Offset(bx, by))
+                        // Glowing Bumper Dome Center
+                        drawCircle(brush = Brush.radialGradient(colors = listOf(Color(0xFFFFFF00), Color(0xFFFF9900)), center = Offset(bx - 3f, by - 3f), radius = bumper.radius * 0.6f), radius = bumper.radius * 0.6f, center = Offset(bx, by))
+                        drawCircle(color = Color.White.copy(alpha = 0.8f), radius = bumper.radius * 0.2f, center = Offset(bx - 4f, by - 4f))
                     }
 
                     // ---------------------------------------------------------------
-                    // Moving Fire Balls (Hazards)
+                    // SHARP MINES HAZARDS (Updated Visuals: Spiked Naval Mines)
                     // ---------------------------------------------------------------
                     for (hazard in levelLayout.hazards) {
                         val hx = (if (hazard.isMoving) (hazard.x + sin(elapsedTime * hazard.speed + hazard.seedOffset) * hazard.pathRadius).coerceIn(0.05f, 0.95f) else hazard.x) * width
                         val hy = (if (hazard.isMoving) (hazard.y + cos(elapsedTime * (hazard.speed * 0.8f) + hazard.seedOffset) * hazard.pathRadius).coerceIn(0.05f, 0.95f) else hazard.y) * height
                         val hCenter = Offset(hx, hy)
 
-                        drawCircle(color = Color(0xFFFF3300).copy(alpha = 0.45f), radius = hazard.radius * 1.4f, center = hCenter)
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                colors = listOf(Color(0xFFFFFF00), Color(0xFFFF6600), Color(0xFFFF0000), Color(0xFF800000)),
-                                center = Offset(hCenter.x - hazard.radius * 0.25f, hCenter.y - hazard.radius * 0.25f),
-                                radius = hazard.radius * 1.2f
-                            ),
-                            radius = hazard.radius, center = hCenter
-                        )
-                        drawCircle(color = Color(0xFFFFCC00), radius = hazard.radius, center = hCenter, style = Stroke(width = 2f))
+                        // Draw Sharp Metallic Spikes (10 sharp spikes around mine body)
+                        val numSpikes = 10
+                        val spikePath = Path()
+                        for (k in 0 until numSpikes * 2) {
+                            val r = if (k % 2 == 0) hazard.radius * 1.45f else hazard.radius * 0.60f
+                            val a = (k * Math.PI / numSpikes).toFloat() + elapsedTime * 2f
+                            val px = hx + cos(a) * r
+                            val py = hy + sin(a) * r
+                            if (k == 0) spikePath.moveTo(px, py) else spikePath.lineTo(px, py)
+                        }
+                        spikePath.close()
+
+                        // Sharp Outer Metallic Mine Body
+                        drawPath(spikePath, brush = Brush.radialGradient(colors = listOf(Color(0xFFFF3300), Color(0xFF550000)), center = hCenter, radius = hazard.radius * 1.4f))
+                        drawPath(spikePath, color = Color(0xFFFFCC00), style = Stroke(width = 2f))
+
+                        // Inner Pulsing Warning Core
+                        val corePulse = 0.4f + 0.2f * sin(elapsedTime * 8f)
+                        drawCircle(color = Color.Red, radius = hazard.radius * 0.45f, center = hCenter)
+                        drawCircle(color = Color.Yellow.copy(alpha = corePulse), radius = hazard.radius * 0.25f, center = hCenter)
                     }
 
                     // ---------------------------------------------------------------
-                    // Ice Patches
+                    // REALISTIC ITEM: ICE PATCHES (Translucent Crystal & Frost)
                     // ---------------------------------------------------------------
                     for (ice in levelLayout.icePatches) {
                         val ix = ice.x * width; val iy = ice.y * height
                         val iw = ice.width * width; val ih = ice.height * height
+
                         drawRoundRect(
-                            color = Color(0x8888E5FF),
+                            brush = Brush.linearGradient(colors = listOf(Color(0xBB88E5FF), Color(0x440088CC))),
                             topLeft = Offset(ix, iy), size = Size(iw, ih),
                             cornerRadius = CornerRadius(12f, 12f)
                         )
+                        // Frost Crack lines
+                        drawLine(color = Color.White.copy(alpha = 0.7f), start = Offset(ix + 10f, iy + 10f), end = Offset(ix + iw * 0.4f, iy + ih * 0.6f), strokeWidth = 1.5f)
+                        drawLine(color = Color.White.copy(alpha = 0.5f), start = Offset(ix + iw * 0.4f, iy + ih * 0.6f), end = Offset(ix + iw - 10f, iy + ih * 0.3f), strokeWidth = 1f)
+
                         drawRoundRect(
                             color = Color.White.copy(alpha = 0.8f),
                             topLeft = Offset(ix, iy), size = Size(iw, ih),
@@ -1404,53 +1390,76 @@ fun SteelBallGameScreen(
                     }
 
                     // ---------------------------------------------------------------
-                    // Boosters
+                    // REALISTIC ITEM: EJECT POINTS / SPEED BOOSTERS
                     // ---------------------------------------------------------------
                     for (booster in levelLayout.boosters) {
                         val bx = booster.x * width; val by = booster.y * height
-                        drawCircle(color = Color(0xFF00FF66).copy(alpha = 0.35f), radius = booster.radius * 1.3f, center = Offset(bx, by))
-                        drawCircle(color = Color(0xFF00FF66), radius = booster.radius, center = Offset(bx, by), style = Stroke(width = 3.5f))
+                        val angle = atan2(booster.dirY, booster.dirX)
+
+                        // Launch Base Pad
+                        drawCircle(brush = Brush.radialGradient(colors = listOf(Color(0xFF00FF66), Color(0xFF004411)), center = Offset(bx, by), radius = booster.radius * 1.3f), radius = booster.radius * 1.2f, center = Offset(bx, by))
+                        drawCircle(color = Color.White, radius = booster.radius * 1.2f, center = Offset(bx, by), style = Stroke(width = 2f))
+
+                        // Animated Launch Arrow Chevrons (>> Directional Eject)
+                        val offsetPulse = (elapsedTime * 40f) % 15f
+                        rotate(degrees = Math.toDegrees(angle.toDouble()).toFloat(), pivot = Offset(bx, by)) {
+                            for (c in -1..1) {
+                                val arrowX = bx + c * 10f + offsetPulse - 5f
+                                val path = Path().apply {
+                                    moveTo(arrowX - 6f, by - 8f)
+                                    lineTo(arrowX + 4f, by)
+                                    lineTo(arrowX - 6f, by + 8f)
+                                }
+                                drawPath(path, color = Color.White, style = Stroke(width = 3f))
+                            }
+                        }
                     }
 
                     // ---------------------------------------------------------------
-                    // Black Holes
+                    // REALISTIC ITEM: BLACK HOLES (Accretion Disk & Gravitational Ring)
                     // ---------------------------------------------------------------
                     for (bh in levelLayout.blackHoles) {
                         val bhX = bh.x * width; val bhY = bh.y * height
                         val bhCenter = Offset(bhX, bhY)
 
-                        drawCircle(color = Color(0xFF3E2723).copy(alpha = 0.45f), radius = bh.radius * 1.25f, center = bhCenter)
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                colors = listOf(Color(0xFF8D6E63), Color(0xFF3E2723), Color(0xFF120804)),
-                                center = Offset(bhX - bh.radius * 0.25f, bhY - bh.radius * 0.25f),
-                                radius = bh.radius * 1.2f
-                            ),
-                            radius = bh.radius, center = bhCenter
-                        )
-                        drawCircle(color = Color(0xFF5D4037), radius = bh.radius, center = bhCenter, style = Stroke(width = 2.5f))
+                        // Gravitational Lensing Aura
+                        drawCircle(color = Color(0xFF9C27B0).copy(alpha = 0.25f), radius = bh.radius * 2.2f, center = bhCenter)
+                        // Swirling Accretion Disk
+                        rotate(degrees = -elapsedTime * 90f, pivot = bhCenter) {
+                            drawCircle(
+                                brush = Brush.sweepGradient(colors = listOf(Color(0xFFFF9800), Color(0xFFE91E63), Color(0xFF3F51B5), Color(0xFFFF9800)), center = bhCenter),
+                                radius = bh.radius * 1.5f, center = bhCenter, style = Stroke(width = 6f)
+                            )
+                        }
+                        // Pitch Black Event Horizon Void
+                        drawCircle(brush = Brush.radialGradient(colors = listOf(Color.Black, Color(0xFF110022)), center = bhCenter, radius = bh.radius), radius = bh.radius, center = bhCenter)
+                        drawCircle(color = Color(0xFFE040FB), radius = bh.radius, center = bhCenter, style = Stroke(width = 1.5f))
                     }
 
                     // ---------------------------------------------------------------
-                    // Walls
+                    // WALLS (Moving walls reach full screen boundaries)
                     // ---------------------------------------------------------------
                     for (wall in levelLayout.walls) {
-                        val currentWx = if (wall.isMoving && wall.moveAxis == 'H') (wall.x + sin(elapsedTime * wall.speed) * wall.moveRange).coerceIn(0.04f, 1f - wall.width - 0.04f) else wall.x
-                        val currentWy = if (wall.isMoving && wall.moveAxis == 'V') (wall.y + cos(elapsedTime * wall.speed) * wall.moveRange).coerceIn(0.04f, 1f - wall.height - 0.04f) else wall.y
+                        val currentWx = if (wall.isMoving && wall.moveAxis == 'H') {
+                            (0.5f + 0.5f * sin(elapsedTime * wall.speed)) * (1f - wall.width)
+                        } else wall.x
+                        val currentWy = if (wall.isMoving && wall.moveAxis == 'V') {
+                            (0.5f + 0.5f * cos(elapsedTime * wall.speed)) * (1f - wall.height)
+                        } else wall.y
+
                         val wallTopLeft = Offset(currentWx * width, currentWy * height)
                         val wallSize = Size(wall.width * width, wall.height * height)
 
                         if (wall.isMoving) {
                             drawRoundRect(brush = Brush.linearGradient(colors = listOf(Color.Yellow, Color(0xFFFF4500), Color.Red)), topLeft = wallTopLeft, size = wallSize, cornerRadius = CornerRadius(8f, 8f))
+                            drawRoundRect(color = Color.White, topLeft = wallTopLeft, size = wallSize, cornerRadius = CornerRadius(8f, 8f), style = Stroke(width = 2f))
                         } else {
                             drawRoundRect(color = theme.bezelBorderColor, topLeft = wallTopLeft, size = wallSize, cornerRadius = CornerRadius(8f, 8f))
                             drawRoundRect(color = theme.arcadeAccentColor.copy(alpha = 0.6f), topLeft = wallTopLeft, size = wallSize, cornerRadius = CornerRadius(8f, 8f), style = Stroke(width = 1.5f))
                         }
                     }
 
-                    // ---------------------------------------------------------------
-                    // Ball motion trail (drawn before the ball so it reads as a glow behind it)
-                    // ---------------------------------------------------------------
+                    // Ball Motion Trail
                     if (gameState != "DEAD") {
                         for ((idx, pos) in trail.withIndex()) {
                             val fraction = (idx + 1f) / (trail.size + 1f)
@@ -1462,9 +1471,7 @@ fun SteelBallGameScreen(
                         }
                     }
 
-                    // ---------------------------------------------------------------
                     // Steel Ball
-                    // ---------------------------------------------------------------
                     if (gameState != "DEAD") {
                         val ballCenter = Offset(ballX, ballY)
                         val highlightOffset = Offset(ballCenter.x - ballRadius * 0.35f, ballCenter.y - ballRadius * 0.35f)
@@ -1476,9 +1483,7 @@ fun SteelBallGameScreen(
                         drawOval(brush = Brush.radialGradient(colors = listOf(Color(0xFFFF4500), Color(0xFF8B0000), Color.Transparent)), topLeft = Offset(ballX - 35f, ballY - 5f), size = Size(70f, 30f))
                     }
 
-                    // ---------------------------------------------------------------
-                    // Animated fire border frame
-                    // ---------------------------------------------------------------
+                    // Animated Fire Border Frame
                     drawRect(
                         brush = Brush.linearGradient(
                             colors = listOf(Color.Red, Color(0xFFFF4500), Color.Yellow, Color(0xFFFF4500), Color.Red),
@@ -1490,9 +1495,7 @@ fun SteelBallGameScreen(
                         style = Stroke(width = 10f)
                     )
 
-                    // ---------------------------------------------------------------
-                    // CRT scanline overlay for authentic arcade-cabinet feel
-                    // ---------------------------------------------------------------
+                    // CRT Scanlines
                     var scanY = 0f
                     while (scanY < height) {
                         drawLine(
