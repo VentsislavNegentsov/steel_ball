@@ -459,7 +459,6 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
 
     var goalX = 0.15f
     var goalY = 0.15f
-    // Enforce minimum distance from start zone (0.85, 0.85) to guarantee a full challenge
     for (attempt in 0..100) {
         val gx = 0.10f + rng.nextFloat() * 0.70f
         val gy = 0.10f + rng.nextFloat() * 0.70f
@@ -476,7 +475,6 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
         }
     }
 
-    // Portal generation prioritized right after goal placement to guarantee early stage appearances
     if (level >= 2 || rng.nextFloat() < 0.8f) {
         for (attempt in 0..100) {
             val p1x = 0.10f + rng.nextFloat() * 0.38f; val p1y = 0.10f + rng.nextFloat() * 0.38f
@@ -636,9 +634,8 @@ fun SteelBallGameScreen(
     var winTitle by remember { mutableStateOf(" PERFECT ") }
     var countdownSeconds by remember { mutableIntStateOf(3) }
 
-    val ballRadius = 22f
     val baseFriction = 0.95f
-    val accelerationFactor = 0.40f
+    val baseAcceleration = 0.40f
 
     val levelLayout = remember(currentLevel) { generateRandomizedAILevel(currentLevel) }
     var elapsedTime by remember { mutableFloatStateOf(0f) }
@@ -689,13 +686,11 @@ fun SteelBallGameScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // Header Controls & Utility Buttons
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Reset Progress Button (Active ONLY when currentLevel == 1)
             val isAtLevelOne = (currentLevel == 1)
             Button(
                 onClick = {
@@ -724,7 +719,6 @@ fun SteelBallGameScreen(
                 )
             }
 
-            // Level Selector
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
@@ -779,7 +773,6 @@ fun SteelBallGameScreen(
                 }
             }
 
-            // Exit Button
             Button(
                 onClick = { activity?.finish() },
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
@@ -809,17 +802,19 @@ fun SteelBallGameScreen(
                             onDoubleTap = { tapOffset ->
                                 val width = size.width.toFloat()
                                 val height = size.height.toFloat()
+                                val refScale = min(width, height) / 1000f
 
                                 for (bh in levelLayout.blackHoles) {
                                     val bhX = bh.x * width
                                     val bhY = bh.y * height
-                                    val hitArea = bh.radius * 2.5f
+                                    val scaledBhRadius = bh.radius * refScale
+                                    val hitArea = scaledBhRadius * 2.5f
 
                                     if (hypot(tapOffset.x - bhX, tapOffset.y - bhY) <= hitArea) {
                                         ballX = bhX
                                         ballY = bhY
                                         val randomAngle = Random.nextFloat() * 2f * Math.PI.toFloat()
-                                        val impulseSpeed = 18f
+                                        val impulseSpeed = 18f * refScale
                                         velocityX = cos(randomAngle) * impulseSpeed
                                         velocityY = sin(randomAngle) * impulseSpeed
 
@@ -839,6 +834,13 @@ fun SteelBallGameScreen(
                 val height = size.height
                 if (width <= 0f || height <= 0f) return@Canvas
 
+                // Reference Scale Rework for Resolution Independence (Target: 1000 Virtual Reference Base)
+                val refScale = min(width, height) / 1000f
+
+                val ballRadius = 22f * refScale
+                val goalRadius = 32f * refScale
+                val startRadius = 34f * refScale
+
                 if (ballX < 0f || ballY < 0f) {
                     ballX = width * 0.85f
                     ballY = height * 0.85f
@@ -848,7 +850,6 @@ fun SteelBallGameScreen(
 
                 val startPos = Offset(width * 0.85f, height * 0.85f)
                 val goalPos = Offset(levelLayout.goalX * width, levelLayout.goalY * height)
-                val goalRadius = 32f
 
                 var friction = baseFriction
                 for (ice in levelLayout.icePatches) {
@@ -863,8 +864,8 @@ fun SteelBallGameScreen(
                     if (portalCooldown > 0) portalCooldown--
 
                     val subSteps = 6
-                    val subAx = (-roll / 30f).coerceIn(-1f, 1f) * accelerationFactor / subSteps
-                    val subAy = (pitch / 30f).coerceIn(-1f, 1f) * accelerationFactor / subSteps
+                    val subAx = (-roll / 30f).coerceIn(-1f, 1f) * (baseAcceleration * refScale) / subSteps
+                    val subAy = (pitch / 30f).coerceIn(-1f, 1f) * (baseAcceleration * refScale) / subSteps
 
                     for (step in 0 until subSteps) {
                         velocityX = (velocityX + subAx) * (friction.pow(1f / subSteps))
@@ -873,9 +874,13 @@ fun SteelBallGameScreen(
                         for (bh in levelLayout.blackHoles) {
                             val bhX = bh.x * width
                             val bhY = bh.y * height
+                            val scaledBhRadius = bh.radius * refScale
                             val dist = hypot(ballX - bhX, ballY - bhY)
-                            if (dist < bh.radius * 3.8f && dist > 4f) {
-                                val pull = (bh.strength / 5f) / (dist * 0.03f)
+
+                            if (dist < scaledBhRadius * 3.8f && dist > 4f * refScale) {
+                                val distVirtual = dist / refScale
+                                val pullVirtual = (bh.strength / 5f) / (distVirtual * 0.03f)
+                                val pull = pullVirtual * refScale
                                 velocityX += ((bhX - ballX) / dist) * pull
                                 velocityY += ((bhY - ballY) / dist) * pull
                             }
@@ -929,9 +934,10 @@ fun SteelBallGameScreen(
                         for (booster in levelLayout.boosters) {
                             val bx = booster.x * width
                             val by = booster.y * height
-                            if (hypot(nextX - bx, nextY - by) < ballRadius + booster.radius) {
-                                velocityX += booster.dirX * 3.8f
-                                velocityY += booster.dirY * 3.8f
+                            val scaledBoosterRadius = booster.radius * refScale
+                            if (hypot(nextX - bx, nextY - by) < ballRadius + scaledBoosterRadius) {
+                                velocityX += booster.dirX * 3.8f * refScale
+                                velocityY += booster.dirY * 3.8f * refScale
                             }
                         }
 
@@ -939,10 +945,11 @@ fun SteelBallGameScreen(
                             if (portalCooldown == 0) {
                                 val p1x = p.x1 * width; val p1y = p.y1 * height
                                 val p2x = p.x2 * width; val p2y = p.y2 * height
+                                val scaledPortalRadius = p.radius * refScale
 
-                                if (hypot(nextX - p1x, nextY - p1y) < ballRadius + p.radius) {
+                                if (hypot(nextX - p1x, nextY - p1y) < ballRadius + scaledPortalRadius) {
                                     nextX = p2x; nextY = p2y; portalCooldown = 30
-                                } else if (hypot(nextX - p2x, nextY - p2y) < ballRadius + p.radius) {
+                                } else if (hypot(nextX - p2x, nextY - p2y) < ballRadius + scaledPortalRadius) {
                                     nextX = p1x; nextY = p1y; portalCooldown = 30
                                 }
                             }
@@ -950,11 +957,12 @@ fun SteelBallGameScreen(
 
                         for (bumper in levelLayout.bumpers) {
                             val bx = bumper.x * width; val by = bumper.y * height
+                            val scaledBumperRadius = bumper.radius * refScale
                             val dist = hypot(nextX - bx, nextY - by)
-                            if (dist < ballRadius + bumper.radius) {
+                            if (dist < ballRadius + scaledBumperRadius) {
                                 val nx = (nextX - bx) / dist; val ny = (nextY - by) / dist
-                                nextX = bx + nx * (ballRadius + bumper.radius)
-                                nextY = by + ny * (ballRadius + bumper.radius)
+                                nextX = bx + nx * (ballRadius + scaledBumperRadius)
+                                nextY = by + ny * (ballRadius + scaledBumperRadius)
                                 val dot = velocityX * nx + velocityY * ny
                                 velocityX = (velocityX - 2 * dot * nx) * 1.35f
                                 velocityY = (velocityY - 2 * dot * ny) * 1.35f
@@ -967,7 +975,8 @@ fun SteelBallGameScreen(
                     for (hazard in levelLayout.hazards) {
                         val hx = (if (hazard.isMoving) (hazard.x + sin(elapsedTime * hazard.speed + hazard.seedOffset) * hazard.pathRadius).coerceIn(0.05f, 0.95f) else hazard.x) * width
                         val hy = (if (hazard.isMoving) (hazard.y + cos(elapsedTime * (hazard.speed * 0.8f) + hazard.seedOffset) * hazard.pathRadius).coerceIn(0.05f, 0.95f) else hazard.y) * height
-                        if (hypot(ballX - hx, ballY - hy) < ballRadius + hazard.radius * 0.70f) {
+                        val scaledHazardRadius = hazard.radius * refScale
+                        if (hypot(ballX - hx, ballY - hy) < ballRadius + scaledHazardRadius * 0.70f) {
                             gameState = "DEAD"
                             try {
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -988,7 +997,7 @@ fun SteelBallGameScreen(
                     }
                 }
 
-                // Render Single Vibrant Animated Fire Border Frame
+                // Render Animated Boundary Frame
                 drawRect(
                     brush = Brush.linearGradient(
                         colors = listOf(Color.Red, Color(0xFFFF4500), Color.Yellow, Color(0xFFFF4500), Color.Red),
@@ -997,89 +1006,95 @@ fun SteelBallGameScreen(
                     ),
                     topLeft = Offset.Zero,
                     size = Size(width, height),
-                    style = Stroke(width = 10f)
+                    style = Stroke(width = 10f * refScale)
                 )
 
                 // Render Ice Patches
                 for (ice in levelLayout.icePatches) {
                     val ix = ice.x * width; val iy = ice.y * height
                     val iw = ice.width * width; val ih = ice.height * height
+                    val cr = 12f * refScale
                     drawRoundRect(
                         color = Color(0x8888E5FF),
                         topLeft = Offset(ix, iy), size = Size(iw, ih),
-                        cornerRadius = CornerRadius(12f, 12f)
+                        cornerRadius = CornerRadius(cr, cr)
                     )
                     drawRoundRect(
                         color = Color.White.copy(alpha = 0.8f),
                         topLeft = Offset(ix, iy), size = Size(iw, ih),
-                        cornerRadius = CornerRadius(12f, 12f),
-                        style = Stroke(width = 2f)
+                        cornerRadius = CornerRadius(cr, cr),
+                        style = Stroke(width = 2f * refScale)
                     )
                 }
 
-                // Render Boosters
+                // Render Speed Boosters
                 for (booster in levelLayout.boosters) {
                     val bx = booster.x * width; val by = booster.y * height
-                    drawCircle(color = Color(0xFF00FF66).copy(alpha = 0.35f), radius = booster.radius * 1.3f, center = Offset(bx, by))
-                    drawCircle(color = Color(0xFF00FF66), radius = booster.radius, center = Offset(bx, by), style = Stroke(width = 3.5f))
+                    val scaledRadius = booster.radius * refScale
+                    drawCircle(color = Color(0xFF00FF66).copy(alpha = 0.35f), radius = scaledRadius * 1.3f, center = Offset(bx, by))
+                    drawCircle(color = Color(0xFF00FF66), radius = scaledRadius, center = Offset(bx, by), style = Stroke(width = 3.5f * refScale))
                 }
 
-                // Render Black Holes (Black / Brown Theme)
+                // Render Black Holes
                 for (bh in levelLayout.blackHoles) {
                     val bhX = bh.x * width; val bhY = bh.y * height
                     val bhCenter = Offset(bhX, bhY)
+                    val scaledRadius = bh.radius * refScale
 
-                    drawCircle(color = Color(0xFF3E2723).copy(alpha = 0.45f), radius = bh.radius * 1.25f, center = bhCenter)
+                    drawCircle(color = Color(0xFF3E2723).copy(alpha = 0.45f), radius = scaledRadius * 1.25f, center = bhCenter)
                     drawCircle(
                         brush = Brush.radialGradient(
                             colors = listOf(Color(0xFF8D6E63), Color(0xFF3E2723), Color(0xFF120804)),
-                            center = Offset(bhX - bh.radius * 0.25f, bhY - bh.radius * 0.25f),
-                            radius = bh.radius * 1.2f
+                            center = Offset(bhX - scaledRadius * 0.25f, bhY - scaledRadius * 0.25f),
+                            radius = scaledRadius * 1.2f
                         ),
-                        radius = bh.radius, center = bhCenter
+                        radius = scaledRadius, center = bhCenter
                     )
-                    drawCircle(color = Color(0xFF5D4037), radius = bh.radius, center = bhCenter, style = Stroke(width = 2.5f))
+                    drawCircle(color = Color(0xFF5D4037), radius = scaledRadius, center = bhCenter, style = Stroke(width = 2.5f * refScale))
                 }
 
                 // Render Wormhole Portals
                 levelLayout.portal?.let { p ->
                     val p1 = Offset(p.x1 * width, p.y1 * height)
                     val p2 = Offset(p.x2 * width, p.y2 * height)
+                    val scaledRadius = p.radius * refScale
 
-                    drawCircle(color = Color(0xFFFF00CC), radius = p.radius, center = p1, style = Stroke(width = 4f))
-                    drawCircle(color = Color(0xFF00FFFF), radius = p.radius, center = p2, style = Stroke(width = 4f))
+                    drawCircle(color = Color(0xFFFF00CC), radius = scaledRadius, center = p1, style = Stroke(width = 4f * refScale))
+                    drawCircle(color = Color(0xFF00FFFF), radius = scaledRadius, center = p2, style = Stroke(width = 4f * refScale))
                 }
 
                 // Start Zone & Goal Hole
-                drawCircle(color = Color.Green.copy(alpha = 0.25f), radius = 34f, center = startPos)
-                drawCircle(color = Color.Green, radius = 34f, center = startPos, style = Stroke(width = 2f))
+                drawCircle(color = Color.Green.copy(alpha = 0.25f), radius = startRadius, center = startPos)
+                drawCircle(color = Color.Green, radius = startRadius, center = startPos, style = Stroke(width = 2f * refScale))
 
                 drawCircle(brush = Brush.radialGradient(colors = listOf(theme.fluidCenterColor, theme.caseOuterBg), center = goalPos, radius = goalRadius), radius = goalRadius, center = goalPos)
-                drawCircle(color = theme.fluidCenterColor, radius = goalRadius, center = goalPos, style = Stroke(width = 3f))
+                drawCircle(color = theme.fluidCenterColor, radius = goalRadius, center = goalPos, style = Stroke(width = 3f * refScale))
 
                 // Render Pinball Bumpers
                 for (bumper in levelLayout.bumpers) {
                     val bx = bumper.x * width; val by = bumper.y * height
-                    drawCircle(color = Color(0xFFFFCC00).copy(alpha = 0.35f), radius = bumper.radius * 1.2f, center = Offset(bx, by))
-                    drawCircle(color = Color(0xFFFFCC00), radius = bumper.radius, center = Offset(bx, by), style = Stroke(width = 3.5f))
+                    val scaledRadius = bumper.radius * refScale
+                    drawCircle(color = Color(0xFFFFCC00).copy(alpha = 0.35f), radius = scaledRadius * 1.2f, center = Offset(bx, by))
+                    drawCircle(color = Color(0xFFFFCC00), radius = scaledRadius, center = Offset(bx, by), style = Stroke(width = 3.5f * refScale))
                 }
 
-                // Render Moving Fire Balls (Hazards)
+                // Render Hazards
                 for (hazard in levelLayout.hazards) {
                     val hx = (if (hazard.isMoving) (hazard.x + sin(elapsedTime * hazard.speed + hazard.seedOffset) * hazard.pathRadius).coerceIn(0.05f, 0.95f) else hazard.x) * width
                     val hy = (if (hazard.isMoving) (hazard.y + cos(elapsedTime * (hazard.speed * 0.8f) + hazard.seedOffset) * hazard.pathRadius).coerceIn(0.05f, 0.95f) else hazard.y) * height
                     val hCenter = Offset(hx, hy)
+                    val scaledRadius = hazard.radius * refScale
 
-                    drawCircle(color = Color(0xFFFF3300).copy(alpha = 0.45f), radius = hazard.radius * 1.4f, center = hCenter)
+                    drawCircle(color = Color(0xFFFF3300).copy(alpha = 0.45f), radius = scaledRadius * 1.4f, center = hCenter)
                     drawCircle(
                         brush = Brush.radialGradient(
                             colors = listOf(Color(0xFFFFFF00), Color(0xFFFF6600), Color(0xFFFF0000), Color(0xFF800000)),
-                            center = Offset(hCenter.x - hazard.radius * 0.25f, hCenter.y - hazard.radius * 0.25f),
-                            radius = hazard.radius * 1.2f
+                            center = Offset(hCenter.x - scaledRadius * 0.25f, hCenter.y - scaledRadius * 0.25f),
+                            radius = scaledRadius * 1.2f
                         ),
-                        radius = hazard.radius, center = hCenter
+                        radius = scaledRadius, center = hCenter
                     )
-                    drawCircle(color = Color(0xFFFFCC00), radius = hazard.radius, center = hCenter, style = Stroke(width = 2f))
+                    drawCircle(color = Color(0xFFFFCC00), radius = scaledRadius, center = hCenter, style = Stroke(width = 2f * refScale))
                 }
 
                 // Render Walls
@@ -1088,12 +1103,13 @@ fun SteelBallGameScreen(
                     val currentWy = if (wall.isMoving && wall.moveAxis == 'V') (wall.y + cos(elapsedTime * wall.speed) * wall.moveRange).coerceIn(0.04f, 1f - wall.height - 0.04f) else wall.y
                     val wallTopLeft = Offset(currentWx * width, currentWy * height)
                     val wallSize = Size(wall.width * width, wall.height * height)
+                    val cr = 8f * refScale
 
                     if (wall.isMoving) {
-                        drawRoundRect(brush = Brush.linearGradient(colors = listOf(Color.Yellow, Color(0xFFFF4500), Color.Red)), topLeft = wallTopLeft, size = wallSize, cornerRadius = CornerRadius(8f, 8f))
+                        drawRoundRect(brush = Brush.linearGradient(colors = listOf(Color.Yellow, Color(0xFFFF4500), Color.Red)), topLeft = wallTopLeft, size = wallSize, cornerRadius = CornerRadius(cr, cr))
                     } else {
-                        drawRoundRect(color = theme.bezelBorderColor, topLeft = wallTopLeft, size = wallSize, cornerRadius = CornerRadius(8f, 8f))
-                        drawRoundRect(color = theme.arcadeAccentColor.copy(alpha = 0.6f), topLeft = wallTopLeft, size = wallSize, cornerRadius = CornerRadius(8f, 8f), style = Stroke(width = 1.5f))
+                        drawRoundRect(color = theme.bezelBorderColor, topLeft = wallTopLeft, size = wallSize, cornerRadius = CornerRadius(cr, cr))
+                        drawRoundRect(color = theme.arcadeAccentColor.copy(alpha = 0.6f), topLeft = wallTopLeft, size = wallSize, cornerRadius = CornerRadius(cr, cr), style = Stroke(width = 1.5f * refScale))
                     }
                 }
 
@@ -1106,7 +1122,11 @@ fun SteelBallGameScreen(
                         radius = ballRadius, center = ballCenter
                     )
                 } else {
-                    drawOval(brush = Brush.radialGradient(colors = listOf(Color(0xFFFF4500), Color(0xFF8B0000), Color.Transparent)), topLeft = Offset(ballX - 35f, ballY - 5f), size = Size(70f, 30f))
+                    drawOval(
+                        brush = Brush.radialGradient(colors = listOf(Color(0xFFFF4500), Color(0xFF8B0000), Color.Transparent)),
+                        topLeft = Offset(ballX - 35f * refScale, ballY - 5f * refScale),
+                        size = Size(70f * refScale, 30f * refScale)
+                    )
                 }
             }
 
