@@ -148,9 +148,19 @@ class MainActivity : ComponentActivity(), SensorEventListener {
 }
 
 // =====================================================================================
-// ENHANCED MULTI-VOICE POLYPHONIC RETRO MUSIC ENGINE
-// Features 4-channel synthesis: Lead Pulse + Polyphonic Arp/Harmony + FM Sub-Bass + Percussion
+// UPGRADED HIGH-OCTANE SYNTH AUDIO ENGINE
+// Multi-channel synthesis: Detuned Pulse PWM Lead + Polyphonic Arp + FM Sub-Bass + Spatial Delay
 // =====================================================================================
+
+data class SongPreset(
+    val name: String,
+    val tempoFactor: Float,
+    val leadNotes: List<Double>,
+    val arpNotes: List<Double>,
+    val bassNotes: List<Double>,
+    val kickPattern: List<Boolean>,
+    val snarePattern: List<Boolean>
+)
 
 class ArcadeMusicPlayer {
     private var audioTrack: AudioTrack? = null
@@ -160,11 +170,68 @@ class ArcadeMusicPlayer {
     @Volatile
     var currentLevel: Int = 1
 
+    private val songCatalog = listOf(
+        // Song 1: Cyber Chiptune
+        SongPreset(
+            name = "Cyber Chiptune", tempoFactor = 1.05f,
+            leadNotes = listOf(523.25, 587.33, 659.25, 783.99, 1046.50, 880.00, 783.99, 659.25),
+            arpNotes = listOf(1046.50, 1318.51, 1567.98, 1318.51, 1046.50, 783.99, 880.00, 1046.50),
+            bassNotes = listOf(130.81, 130.81, 146.83, 164.81, 130.81, 110.00, 130.81, 146.83),
+            kickPattern = listOf(true, false, false, false, true, false, false, false),
+            snarePattern = listOf(false, false, true, false, false, false, true, false)
+        ),
+        // Song 2: Neon Synthwave
+        SongPreset(
+            name = "Neon Synthwave", tempoFactor = 0.95f,
+            leadNotes = listOf(440.00, 523.25, 587.33, 659.25, 783.99, 659.25, 523.25, 440.00),
+            arpNotes = listOf(880.00, 1046.50, 1174.66, 1318.51, 1174.66, 1046.50, 880.00, 698.46),
+            bassNotes = listOf(110.00, 110.00, 130.81, 130.81, 87.31, 87.31, 98.00, 110.00),
+            kickPattern = listOf(true, false, true, false, true, false, true, false),
+            snarePattern = listOf(false, false, true, false, false, false, true, false)
+        ),
+        // Song 3: Starlight Rush
+        SongPreset(
+            name = "Starlight Rush", tempoFactor = 1.20f,
+            leadNotes = listOf(659.25, 783.99, 880.00, 1046.50, 1174.66, 1046.50, 880.00, 783.99),
+            arpNotes = listOf(1318.51, 1567.98, 1760.00, 2093.00, 1760.00, 1567.98, 1318.51, 1046.50),
+            bassNotes = listOf(164.81, 164.81, 196.00, 220.00, 164.81, 146.83, 130.81, 146.83),
+            kickPattern = listOf(true, false, false, true, true, false, false, false),
+            snarePattern = listOf(false, false, true, false, false, true, true, false)
+        ),
+        // Song 4: Gravity Void
+        SongPreset(
+            name = "Gravity Void", tempoFactor = 0.88f,
+            leadNotes = listOf(349.23, 392.00, 440.00, 523.25, 440.00, 392.00, 349.23, 293.66),
+            arpNotes = listOf(698.46, 783.99, 880.00, 1046.50, 880.00, 783.99, 698.46, 587.33),
+            bassNotes = listOf(87.31, 87.31, 98.00, 110.00, 87.31, 73.42, 65.41, 73.42),
+            kickPattern = listOf(true, false, false, false, false, false, true, false),
+            snarePattern = listOf(false, false, true, false, false, false, true, true)
+        ),
+        // Song 5: Orbital Velocity
+        SongPreset(
+            name = "Orbital Velocity", tempoFactor = 1.12f,
+            leadNotes = listOf(587.33, 659.25, 739.99, 880.00, 987.77, 880.00, 739.99, 659.25),
+            arpNotes = listOf(1174.66, 1318.51, 1479.98, 1760.00, 1479.98, 1318.51, 1174.66, 987.77),
+            bassNotes = listOf(146.83, 146.83, 164.81, 185.00, 146.83, 123.47, 146.83, 164.81),
+            kickPattern = listOf(true, false, true, false, true, false, false, true),
+            snarePattern = listOf(false, false, true, false, false, true, true, false)
+        ),
+        // Song 6: Hyperdrive Arcade
+        SongPreset(
+            name = "Hyperdrive Arcade", tempoFactor = 1.30f,
+            leadNotes = listOf(783.99, 880.00, 1046.50, 1174.66, 1318.51, 1567.98, 1318.51, 1046.50),
+            arpNotes = listOf(1567.98, 1760.00, 2093.00, 2349.32, 2093.00, 1760.00, 1567.98, 1318.51),
+            bassNotes = listOf(196.00, 196.00, 220.00, 261.63, 196.00, 164.81, 196.00, 220.00),
+            kickPattern = listOf(true, true, false, false, true, true, false, false),
+            snarePattern = listOf(false, false, true, false, false, false, true, true)
+        )
+    )
+
     fun start() {
         if (isPlaying) return
         isPlaying = true
         thread = Thread {
-            val sampleRate = 22050
+            val sampleRate = 44100
             val channelConfig = AudioFormat.CHANNEL_OUT_MONO
             val audioFormat = AudioFormat.ENCODING_PCM_16BIT
             val bufferSize = AudioTrack.getMinBufferSize(sampleRate, channelConfig, audioFormat)
@@ -192,62 +259,79 @@ class ArcadeMusicPlayer {
             val rng = Random(42)
             var stepCounter = 0
 
-            // Multi-channel retro scales (Frequency sequences)
-            val scales = listOf(
-                listOf(261.63, 293.66, 329.63, 392.00, 440.00, 523.25), // C Major Chiptune
-                listOf(220.00, 261.63, 293.66, 329.63, 392.00, 440.00), // A Minor Synth
-                listOf(196.00, 220.00, 246.94, 293.66, 329.63, 392.00), // G Pentatonic
-                listOf(174.61, 220.00, 261.63, 329.63, 349.23, 440.00), // F Lydian Dynamic
-                listOf(146.83, 174.61, 196.00, 220.00, 261.63, 293.66)  // D Minor Dark
-            )
+            // Delay Line for Arcade Spatial Reverb/Echo Effect (120ms)
+            val delaySize = (sampleRate * 0.12).toInt()
+            val delayBuffer = FloatArray(delaySize)
+            var delayIdx = 0
+
+            var timeAcc = 0.0
 
             while (isPlaying) {
                 val lvl = currentLevel
-                val scale = scales[(lvl - 1) % scales.size]
-                val tempoBoost = (1f - (lvl % 10) * 0.012f).coerceIn(0.75f, 1f)
-                val baseDuration = (sampleRate / 8 * tempoBoost).toInt()
+                val song = songCatalog[(lvl - 1) % songCatalog.size]
+                val baseDuration = (sampleRate / 8 * (1f / song.tempoFactor)).toInt()
 
-                // Polyphonic voices selection
-                val leadFreq = scale[stepCounter % scale.size]
-                val arpFreq = scale[(stepCounter * 2 + 1) % scale.size] * 1.5
-                val bassFreq = scale[(stepCounter / 2) % scale.size] / 2.0
+                val stepIdx = stepCounter % song.leadNotes.size
+                val leadFreq = song.leadNotes[stepIdx]
+                val arpFreq = song.arpNotes[(stepCounter * 2) % song.arpNotes.size]
+                val bassFreq = song.bassNotes[stepIdx]
 
-                val isKick = stepCounter % 4 == 0
-                val isSnare = stepCounter % 4 == 2
+                val isKick = song.kickPattern[stepIdx % song.kickPattern.size]
+                val isSnare = song.snarePattern[stepIdx % song.snarePattern.size]
                 val isHat = stepCounter % 2 == 1
 
                 stepCounter++
                 val buffer = ShortArray(baseDuration)
 
                 for (i in 0 until baseDuration) {
-                    val t = i.toDouble() / sampleRate
-                    val env = sin((i.toDouble() / baseDuration) * Math.PI)
+                    val t = timeAcc + (i.toDouble() / sampleRate)
+                    val env = sin((i.toDouble() / baseDuration) * Math.PI).pow(0.7)
 
-                    // Channel 1: Lead Pulse Wave (duty cycle 25% to 50%)
-                    val pulseDuty = 0.25 + 0.25 * sin(2.0 * Math.PI * 0.5 * t)
-                    val leadPhase = (leadFreq * t) % 1.0
-                    val leadWave = if (leadPhase < pulseDuty) 0.5 else -0.5
+                    // 1. Thick Detuned Pulse/Saw Lead with PWM
+                    val pwm = 0.40 + 0.20 * sin(2.0 * Math.PI * 1.5 * t)
+                    val phase1 = (leadFreq * t) % 1.0
+                    val phase2 = ((leadFreq * 1.004) * t) % 1.0 // 0.4% detune
+                    val pulse1 = if (phase1 < pwm) 0.5 else -0.5
+                    val pulse2 = 2.0 * (phase2 - floor(phase2 + 0.5)) // Sawtooth
+                    val leadWave = (pulse1 * 0.6 + pulse2 * 0.4)
 
-                    // Channel 2: Arpeggiator / Harmony (Sawtooth / Triangle blend)
+                    // 2. Bright Polyphonic Arpeggiator
                     val arpSaw = 2.0 * (arpFreq * t - floor(arpFreq * t + 0.5))
                     val arpTri = asin(sin(2.0 * Math.PI * arpFreq * t)) / (Math.PI / 2.0)
-                    val harmonyWave = (arpSaw * 0.4 + arpTri * 0.6) * 0.35
+                    val harmonyWave = (arpSaw * 0.5 + arpTri * 0.5) * 0.35
 
-                    // Channel 3: Deep Sub-Bass (FM Modulated Sine Wave)
-                    val bassMod = sin(2.0 * Math.PI * (bassFreq * 0.5) * t) * 2.0
-                    val bassWave = sin(2.0 * Math.PI * bassFreq * t + bassMod) * 0.45
+                    // 3. Deep Punchy FM Sub-Bass
+                    val bassEnv = exp(-i.toDouble() / (baseDuration * 0.85))
+                    val bassMod = sin(2.0 * Math.PI * (bassFreq * 0.5) * t) * 2.5
+                    val bassWave = sin(2.0 * Math.PI * bassFreq * t + bassMod) * bassEnv * 0.50
 
-                    // Channel 4: Percussion Engine
-                    val kick = if (isKick) sin(2.0 * Math.PI * (70.0 * exp(-i / 500.0)) * t) * exp(-i / 800.0) else 0.0
-                    val snare = if (isSnare) (rng.nextDouble() * 2.0 - 1.0) * exp(-i / 600.0) else 0.0
-                    val hat = if (isHat && i < 400) (rng.nextDouble() * 2.0 - 1.0) * exp(-i / 150.0) * 0.4 else 0.0
+                    // 4. Dynamic Percussion
+                    val kickEnv = exp(-i.toDouble() / 900.0)
+                    val kickSweep = 120.0 * exp(-i.toDouble() / 700.0) + 45.0
+                    val kick = if (isKick) sin(2.0 * Math.PI * kickSweep * t) * kickEnv else 0.0
 
-                    val drums = (kick * 0.5 + snare * 0.3 + hat * 0.2)
+                    val snareEnv = exp(-i.toDouble() / 1100.0)
+                    val snareNoise = (rng.nextDouble() * 2.0 - 1.0)
+                    val snareTone = sin(2.0 * Math.PI * 180.0 * t) * exp(-i.toDouble() / 400.0)
+                    val snare = if (isSnare) (snareNoise * 0.7 + snareTone * 0.3) * snareEnv else 0.0
 
-                    // Master Polyphonic Mix
-                    val mixed = (leadWave * 0.35 + harmonyWave + bassWave + drums) * env
-                    buffer[i] = (mixed * 4200.0).toInt().coerceIn(-32768, 32767).toShort()
+                    val hat = if (isHat && i < 600) (rng.nextDouble() * 2.0 - 1.0) * exp(-i.toDouble() / 250.0) * 0.30 else 0.0
+
+                    val drums = (kick * 0.60 + snare * 0.40 + hat * 0.25)
+
+                    // Mix Dry Signal
+                    val drySignal = (leadWave * 0.32 + harmonyWave + bassWave + drums) * env
+
+                    // Echo / Delay Feedback Loop
+                    val delayedSample = delayBuffer[delayIdx]
+                    val wetSignal = drySignal + delayedSample * 0.35f
+                    delayBuffer[delayIdx] = wetSignal.toFloat()
+                    delayIdx = (delayIdx + 1) % delaySize
+
+                    buffer[i] = (wetSignal * 5500.0).toInt().coerceIn(-32768, 32767).toShort()
                 }
+
+                timeAcc += baseDuration.toDouble() / sampleRate
 
                 try {
                     audioTrack?.write(buffer, 0, buffer.size)
@@ -268,7 +352,7 @@ class ArcadeMusicPlayer {
 }
 
 // =====================================================================================
-// VISUAL THEMES — eight distinct arcade cabinet palettes, cycling every level
+// VISUAL THEMES
 // =====================================================================================
 
 data class ThemePalette(
@@ -405,7 +489,6 @@ fun isLevelPassable(layout: LevelLayout): Boolean {
     val grid = Array(gridSize) { BooleanArray(gridSize) { true } }
     val ballMargin = 0.035f
 
-    // Static wall placement check
     for (wall in layout.walls) {
         if (!wall.isMoving) {
             val rect = wall.getPlacementRect()
@@ -473,8 +556,8 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
     val windZones = mutableListOf<WindZone>()
     val beams = mutableListOf<RotatingBeam>()
 
-    val speedMultiplier = 1f + (level - 1) * 0.30f
-    val dynamicSpeed = (0.80f + rng.nextFloat() * 0.50f) * speedMultiplier
+    val speedMultiplier = 1f + (level - 1) * 0.25f
+    val dynamicSpeed = (0.75f + rng.nextFloat() * 0.40f) * speedMultiplier
 
     fun canPlace(rect: PlacementRect, padding: Float = 0.01f): Boolean {
         return occupied.none { it.overlaps(rect, padding) }
@@ -537,7 +620,7 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
         }
     }
 
-    val lavaCount = (5 + level * 2).coerceAtMost(18)
+    val lavaCount = (4 + level * 2).coerceAtMost(16)
     for (i in 0 until lavaCount) {
         for (attempt in 0..40) {
             val pathR = 0.06f + rng.nextFloat() * 0.08f
@@ -548,7 +631,7 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
                 x = hx, y = hy,
                 radius = 18f + rng.nextFloat() * 14f,
                 isMoving = true,
-                speed = dynamicSpeed * 1.2f,
+                speed = dynamicSpeed * 1.1f,
                 pathRadius = pathR,
                 seedOffset = rng.nextFloat() * 10f
             )
@@ -562,7 +645,7 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
     }
 
     val bhCount = (2 + level).coerceAtMost(6)
-    val holeStrength = (0.65f + (level - 1) * 0.08f).coerceAtMost(1.1f)
+    val holeStrength = (0.60f + (level - 1) * 0.07f).coerceAtMost(1.0f)
     for (i in 0 until bhCount) {
         for (attempt in 0..40) {
             val bhx = 0.08f + rng.nextFloat() * 0.82f
@@ -666,7 +749,7 @@ fun buildSingleLevelCandidate(level: Int, seed: Long): LevelLayout {
                 val bcx = 0.15f + rng.nextFloat() * 0.70f
                 val bcy = 0.15f + rng.nextFloat() * 0.70f
                 val len = 90f + rng.nextFloat() * 60f
-                val beamSpeed = (0.6f + rng.nextFloat() * 0.6f) * speedMultiplier
+                val beamSpeed = (0.5f + rng.nextFloat() * 0.5f) * speedMultiplier
                 val candidate = RotatingBeam(bcx, bcy, len, beamSpeed, rng.nextFloat() * 6.28f)
                 val rect = candidate.getPlacementRect()
                 if (canPlace(rect, 0.015f)) {
@@ -723,7 +806,8 @@ fun SteelBallGameScreen(
     var ballY by remember { mutableFloatStateOf(-1f) }
     var velocityX by remember { mutableFloatStateOf(0f) }
     var velocityY by remember { mutableFloatStateOf(0f) }
-    var portalCooldown by remember { mutableIntStateOf(0) }
+
+    var isInsidePortal by remember { mutableStateOf(false) }
 
     val congratulationTitles = remember { listOf(" UNBELIEVABLE ", " PERFECT ", " INSANE SKILL ", " VICTORY ", " MASTERED ") }
     var winTitle by remember { mutableStateOf(" PERFECT ") }
@@ -755,6 +839,7 @@ fun SteelBallGameScreen(
         arcadeMusicPlayer?.currentLevel = currentLevel
         stageStartTime = elapsedTime
         trail.clear()
+        isInsidePortal = false
     }
 
     LaunchedEffect(gameState) {
@@ -772,6 +857,7 @@ fun SteelBallGameScreen(
                 prefs.edit().putInt("current_level", currentLevel).apply()
                 gameState = "PLAYING"
                 ballX = -1f; ballY = -1f; velocityX = 0f; velocityY = 0f
+                isInsidePortal = false
             }
         } else if (gameState == "DEAD") {
             countdownSeconds = 3
@@ -782,6 +868,7 @@ fun SteelBallGameScreen(
                 gameState = "PLAYING"
                 ballX = -1f; ballY = -1f; velocityX = 0f; velocityY = 0f
                 trail.clear()
+                isInsidePortal = false
             }
         }
     }
@@ -795,44 +882,49 @@ fun SteelBallGameScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // Header Controls
+        // -------------------------------------------------------------------------------------
+        // HEADER CONTROLS (Layout updated so arrows are right beside Reset/Exit with zero overlap)
+        // -------------------------------------------------------------------------------------
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             val isAtLevelOne = (currentLevel == 1)
-            Button(
-                onClick = {
-                    if (isAtLevelOne) {
-                        currentLevel = 1
-                        maxLevelReached = 1
-                        prefs.edit().putInt("current_level", 1).putInt("max_level", 1).apply()
-                        gameState = "PLAYING"
-                        ballX = -1f; ballY = -1f; velocityX = 0f; velocityY = 0f
-                    }
-                },
-                enabled = isAtLevelOne,
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isAtLevelOne) Color(0xFF990000) else Color.DarkGray,
-                    disabledContainerColor = Color(0xFF222222)
-                ),
-                border = BorderStroke(1.dp, if (isAtLevelOne) Color.Red else Color.Gray),
-                modifier = Modifier.height(30.dp)
-            ) {
-                Text(
-                    text = "RESET",
-                    color = if (isAtLevelOne) Color.White else Color.Gray,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
 
+            // Left Section: RESET Button + Left Arrow Button
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
+                Button(
+                    onClick = {
+                        if (isAtLevelOne) {
+                            currentLevel = 1
+                            maxLevelReached = 1
+                            prefs.edit().putInt("current_level", 1).putInt("max_level", 1).apply()
+                            gameState = "PLAYING"
+                            ballX = -1f; ballY = -1f; velocityX = 0f; velocityY = 0f
+                            isInsidePortal = false
+                        }
+                    },
+                    enabled = isAtLevelOne,
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isAtLevelOne) Color(0xFF990000) else Color.DarkGray,
+                        disabledContainerColor = Color(0xFF222222)
+                    ),
+                    border = BorderStroke(1.dp, if (isAtLevelOne) Color.Red else Color.Gray),
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    Text(
+                        text = "RESET",
+                        color = if (isAtLevelOne) Color.White else Color.Gray,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
                 Button(
                     onClick = {
                         if (currentLevel > 1) {
@@ -840,6 +932,7 @@ fun SteelBallGameScreen(
                             prefs.edit().putInt("current_level", currentLevel).apply()
                             gameState = "PLAYING"
                             ballX = -1f; ballY = -1f; velocityX = 0f; velocityY = 0f
+                            isInsidePortal = false
                         }
                     },
                     enabled = currentLevel > 1,
@@ -850,21 +943,26 @@ fun SteelBallGameScreen(
                 ) {
                     Text(text = "◀", color = if (currentLevel > 1) Color.White else Color.DarkGray, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.rotate(90f))
                 }
+            }
 
-                Spacer(modifier = Modifier.width(8.dp))
+            // Center Section: Rotated STAGE Text with dedicated space
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier
+                    .rotate(90f)
+                    .padding(horizontal = 8.dp)
+            ) {
+                Text(text = "STAGE", color = theme.arcadeAccentColor, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Text(text = "$currentLevel", color = theme.arcadeAccentColor, fontSize = 13.sp, fontWeight = FontWeight.Black)
+                Text(text = diffText, color = diffColor, fontSize = 8.sp, fontWeight = FontWeight.Black)
+            }
 
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                    modifier = Modifier.rotate(90f)
-                ) {
-                    Text(text = "STAGE", color = theme.arcadeAccentColor, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                    Text(text = "$currentLevel", color = theme.arcadeAccentColor, fontSize = 12.sp, fontWeight = FontWeight.Black)
-                    Text(text = diffText, color = diffColor, fontSize = 8.sp, fontWeight = FontWeight.Black)
-                }
-
-                Spacer(modifier = Modifier.width(8.dp))
-
+            // Right Section: Right Arrow Button + EXIT Button
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
                 Button(
                     onClick = {
                         if (currentLevel < maxLevelReached) {
@@ -872,6 +970,7 @@ fun SteelBallGameScreen(
                             prefs.edit().putInt("current_level", currentLevel).apply()
                             gameState = "PLAYING"
                             ballX = -1f; ballY = -1f; velocityX = 0f; velocityY = 0f
+                            isInsidePortal = false
                         }
                     },
                     enabled = currentLevel < maxLevelReached,
@@ -882,16 +981,16 @@ fun SteelBallGameScreen(
                 ) {
                     Text(text = "▶", color = if (currentLevel < maxLevelReached) Color.White else Color.DarkGray, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.rotate(90f))
                 }
-            }
 
-            Button(
-                onClick = { activity?.finish() },
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333)),
-                border = BorderStroke(1.dp, Color.Gray),
-                modifier = Modifier.height(30.dp)
-            ) {
-                Text(text = "EXIT", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Button(
+                    onClick = { activity?.finish() },
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333)),
+                    border = BorderStroke(1.dp, Color.Gray),
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    Text(text = "EXIT", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
 
@@ -964,8 +1063,9 @@ fun SteelBallGameScreen(
                     }
                 }
 
+                val wallTravelFraction = (0.32f + (currentLevel - 1) * 0.055f).coerceAtMost(1.0f)
+
                 if (gameState == "PLAYING") {
-                    if (portalCooldown > 0) portalCooldown--
                     if (shakeMagnitude > 0f) shakeMagnitude *= 0.9f
 
                     val subSteps = 6
@@ -1011,13 +1111,19 @@ fun SteelBallGameScreen(
                             break
                         }
 
-                        // Wall Collisions (Full frame edge-to-edge calculation for moving walls)
+                        // Wall Collisions
                         for (wall in levelLayout.walls) {
+                            val maxTravelH = 1f - wall.width
+                            val maxTravelV = 1f - wall.height
+
                             val currentWx = if (wall.isMoving && wall.moveAxis == 'H') {
-                                (0.5f + 0.5f * sin(elapsedTime * wall.speed)) * (1f - wall.width)
+                                val centerH = maxTravelH / 2f
+                                centerH + (sin(elapsedTime * wall.speed) * 0.5f) * maxTravelH * wallTravelFraction
                             } else wall.x
+
                             val currentWy = if (wall.isMoving && wall.moveAxis == 'V') {
-                                (0.5f + 0.5f * cos(elapsedTime * wall.speed)) * (1f - wall.height)
+                                val centerV = maxTravelV / 2f
+                                centerV + (cos(elapsedTime * wall.speed) * 0.5f) * maxTravelV * wallTravelFraction
                             } else wall.y
 
                             val wx = currentWx * width; val wy = currentWy * height
@@ -1059,14 +1165,26 @@ fun SteelBallGameScreen(
                         }
 
                         levelLayout.portal?.let { p ->
-                            if (portalCooldown == 0) {
-                                val p1x = p.x1 * width; val p1y = p.y1 * height
-                                val p2x = p.x2 * width; val p2y = p.y2 * height
+                            val p1x = p.x1 * width; val p1y = p.y1 * height
+                            val p2x = p.x2 * width; val p2y = p.y2 * height
 
-                                if (hypot(nextX - p1x, nextY - p1y) < ballRadius + p.radius) {
-                                    nextX = p2x; nextY = p2y; portalCooldown = 30
-                                } else if (hypot(nextX - p2x, nextY - p2y) < ballRadius + p.radius) {
-                                    nextX = p1x; nextY = p1y; portalCooldown = 30
+                            val distP1 = hypot(nextX - p1x, nextY - p1y)
+                            val distP2 = hypot(nextX - p2x, nextY - p2y)
+                            val exitClearance = ballRadius * 2f + p.radius
+
+                            if (isInsidePortal) {
+                                if (distP1 > exitClearance && distP2 > exitClearance) {
+                                    isInsidePortal = false
+                                }
+                            } else {
+                                if (distP1 < p.radius) {
+                                    nextX = p2x
+                                    nextY = p2y
+                                    isInsidePortal = true
+                                } else if (distP2 < p.radius) {
+                                    nextX = p1x
+                                    nextY = p1y
+                                    isInsidePortal = true
                                 }
                             }
                         }
@@ -1087,7 +1205,7 @@ fun SteelBallGameScreen(
                         ballX = nextX; ballY = nextY
                     }
 
-                    // Sharp Mines Hazard Collisions
+                    // Hazard Collisions
                     for (hazard in levelLayout.hazards) {
                         val hx = (if (hazard.isMoving) (hazard.x + sin(elapsedTime * hazard.speed + hazard.seedOffset) * hazard.pathRadius).coerceIn(0.05f, 0.95f) else hazard.x) * width
                         val hy = (if (hazard.isMoving) (hazard.y + cos(elapsedTime * (hazard.speed * 0.8f) + hazard.seedOffset) * hazard.pathRadius).coerceIn(0.05f, 0.95f) else hazard.y) * height
@@ -1159,10 +1277,7 @@ fun SteelBallGameScreen(
                 val shakeY = if (shakeMagnitude > 0.3f) (Random.nextFloat() - 0.5f) * shakeMagnitude else 0f
                 translate(shakeX, shakeY) {
 
-                    // ---------------------------------------------------------------
-                    // FULL SCREEN DYNAMIC WARP BACKGROUND (Changes Style Per Level)
-                    // Spans the entirety of the display canvas (Full Screen)
-                    // ---------------------------------------------------------------
+                    // FULL SCREEN BACKGROUND
                     drawRect(
                         brush = Brush.verticalGradient(colors = listOf(theme.skyTop, theme.skyBottom)),
                         topLeft = Offset.Zero, size = Size(width, height)
@@ -1170,7 +1285,7 @@ fun SteelBallGameScreen(
 
                     val bgStyleMode = (currentLevel - 1) % 3
                     when (bgStyleMode) {
-                        0 -> { // HYPERDRIVE RADIAL WARP TUNNEL
+                        0 -> {
                             val centerX = width / 2f
                             val centerY = height / 2f
                             val rayCount = 18
@@ -1193,7 +1308,7 @@ fun SteelBallGameScreen(
                                 }
                             }
                         }
-                        1 -> { // FULL-SCREEN PERSPECTIVE WARP GRID
+                        1 -> {
                             val scrollY = (elapsedTime * 60f) % 40f
                             var gy = scrollY
                             while (gy < height) {
@@ -1212,7 +1327,7 @@ fun SteelBallGameScreen(
                                 gx += 40f
                             }
                         }
-                        else -> { // HIGH-SPEED VECTOR SPEED LINES
+                        else -> {
                             val speed = (elapsedTime * 300f) % width
                             for (line in 0..12) {
                                 val yPos = (height / 12) * line + (sin(elapsedTime + line) * 20f)
@@ -1227,7 +1342,7 @@ fun SteelBallGameScreen(
                         }
                     }
 
-                    // Twinkling Starfield Across Full Viewport
+                    // Twinkling Starfield
                     val starRng = Random(currentLevel * 991L)
                     repeat(55) {
                         val sx = starRng.nextFloat() * width
@@ -1236,34 +1351,81 @@ fun SteelBallGameScreen(
                         drawCircle(color = Color.White.copy(alpha = twinkle * 0.7f), radius = 1.8f, center = Offset(sx, sy))
                     }
 
-                    // ---------------------------------------------------------------
-                    // REALISTIC ITEM: WORMHOLE TELEPORT / PORTALS
-                    // ---------------------------------------------------------------
+                    // WORMHOLE TELEPORT / PORTALS
                     levelLayout.portal?.let { p ->
                         val p1 = Offset(p.x1 * width, p.y1 * height)
                         val p2 = Offset(p.x2 * width, p.y2 * height)
 
                         for (portalPos in listOf(p1, p2)) {
-                            // Swirling Vortex Arc Rings
                             rotate(degrees = elapsedTime * 120f, pivot = portalPos) {
                                 drawCircle(
                                     brush = Brush.sweepGradient(colors = listOf(Color(0xFFFF00CC), Color(0xFF00FFFF), Color(0xFFFF00CC)), center = portalPos),
                                     radius = p.radius * 1.3f, center = portalPos, style = Stroke(width = 4f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(15f, 10f)))
                                 )
                             }
-                            // Deep Space Void Center
                             drawCircle(brush = Brush.radialGradient(colors = listOf(Color.Black, Color(0xFF20003B)), center = portalPos, radius = p.radius), radius = p.radius, center = portalPos)
                             drawCircle(color = Color.White, radius = p.radius * 0.3f, center = portalPos)
                         }
                     }
 
-                    // Start Zone & Goal Hole
+                    // Start Zone
                     drawCircle(color = Color.Green.copy(alpha = 0.25f), radius = 34f, center = startPos)
                     drawCircle(color = Color.Green, radius = 34f, center = startPos, style = Stroke(width = 2f))
 
-                    val goalPulse = 1f + 0.08f * sin(elapsedTime * 4f)
-                    drawCircle(brush = Brush.radialGradient(colors = listOf(theme.fluidCenterColor, theme.caseOuterBg), center = goalPos, radius = goalRadius * goalPulse), radius = goalRadius * goalPulse, center = goalPos)
-                    drawCircle(color = theme.fluidCenterColor, radius = goalRadius * goalPulse, center = goalPos, style = Stroke(width = 3f))
+                    // -------------------------------------------------------------------------------------
+                    // RADIANT EPIC FINAL GOAL POINT (White Glow + Rotating Target Reticles)
+                    // -------------------------------------------------------------------------------------
+                    val goalPulse = 1f + 0.12f * sin(elapsedTime * 6f)
+                    val goalGlowRadius = goalRadius * 2.3f * goalPulse
+
+                    // 1. Giant White Radiant Outer Glow Aura
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.95f),
+                                Color(0xFF00FFFF).copy(alpha = 0.65f),
+                                theme.fluidCenterColor.copy(alpha = 0.35f),
+                                Color.Transparent
+                            ),
+                            center = goalPos,
+                            radius = goalGlowRadius
+                        ),
+                        radius = goalGlowRadius,
+                        center = goalPos
+                    )
+
+                    // 2. Dual Counter-Rotating Radiant Target Reticles
+                    rotate(degrees = elapsedTime * 90f, pivot = goalPos) {
+                        drawCircle(
+                            color = Color.White.copy(alpha = 0.85f),
+                            radius = goalRadius * 1.45f * goalPulse,
+                            center = goalPos,
+                            style = Stroke(width = 3f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 10f)))
+                        )
+                    }
+                    rotate(degrees = -elapsedTime * 135f, pivot = goalPos) {
+                        drawCircle(
+                            color = Color(0xFFFFFF00).copy(alpha = 0.9f),
+                            radius = goalRadius * 1.18f,
+                            center = goalPos,
+                            style = Stroke(width = 2.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f)))
+                        )
+                    }
+
+                    // 3. Inner Pulsing Core
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color.White, Color(0xFFE0FFFF), theme.fluidCenterColor),
+                            center = goalPos,
+                            radius = goalRadius * goalPulse
+                        ),
+                        radius = goalRadius * goalPulse,
+                        center = goalPos
+                    )
+
+                    // 4. Pure White Hot Center Core
+                    drawCircle(color = Color.White, radius = goalRadius * 0.45f * goalPulse, center = goalPos)
+                    drawCircle(color = Color.White, radius = goalRadius * 0.25f, center = goalPos)
 
                     // Wind zones
                     for (wind in levelLayout.windZones) {
@@ -1321,29 +1483,22 @@ fun SteelBallGameScreen(
                         drawCircle(color = Color(0xFFFFEB3B), radius = 7f, center = Offset(bcx, bcy))
                     }
 
-                    // ---------------------------------------------------------------
-                    // REALISTIC ITEM: PINBALL BUMPERS
-                    // ---------------------------------------------------------------
+                    // PINBALL BUMPERS
                     for (bumper in levelLayout.bumpers) {
                         val bx = bumper.x * width; val by = bumper.y * height
 
-                        // Chrome Outer Ring & Spring Coils
                         drawCircle(brush = Brush.radialGradient(colors = listOf(Color.White, Color.Gray, Color.DarkGray), center = Offset(bx - 5f, by - 5f), radius = bumper.radius * 1.2f), radius = bumper.radius * 1.15f, center = Offset(bx, by))
                         drawCircle(color = Color(0xFF222222), radius = bumper.radius * 0.85f, center = Offset(bx, by))
-                        // Glowing Bumper Dome Center
                         drawCircle(brush = Brush.radialGradient(colors = listOf(Color(0xFFFFFF00), Color(0xFFFF9900)), center = Offset(bx - 3f, by - 3f), radius = bumper.radius * 0.6f), radius = bumper.radius * 0.6f, center = Offset(bx, by))
                         drawCircle(color = Color.White.copy(alpha = 0.8f), radius = bumper.radius * 0.2f, center = Offset(bx - 4f, by - 4f))
                     }
 
-                    // ---------------------------------------------------------------
-                    // SHARP MINES HAZARDS (Updated Visuals: Spiked Naval Mines)
-                    // ---------------------------------------------------------------
+                    // SHARP MINES HAZARDS
                     for (hazard in levelLayout.hazards) {
                         val hx = (if (hazard.isMoving) (hazard.x + sin(elapsedTime * hazard.speed + hazard.seedOffset) * hazard.pathRadius).coerceIn(0.05f, 0.95f) else hazard.x) * width
                         val hy = (if (hazard.isMoving) (hazard.y + cos(elapsedTime * (hazard.speed * 0.8f) + hazard.seedOffset) * hazard.pathRadius).coerceIn(0.05f, 0.95f) else hazard.y) * height
                         val hCenter = Offset(hx, hy)
 
-                        // Draw Sharp Metallic Spikes (10 sharp spikes around mine body)
                         val numSpikes = 10
                         val spikePath = Path()
                         for (k in 0 until numSpikes * 2) {
@@ -1355,19 +1510,15 @@ fun SteelBallGameScreen(
                         }
                         spikePath.close()
 
-                        // Sharp Outer Metallic Mine Body
                         drawPath(spikePath, brush = Brush.radialGradient(colors = listOf(Color(0xFFFF3300), Color(0xFF550000)), center = hCenter, radius = hazard.radius * 1.4f))
                         drawPath(spikePath, color = Color(0xFFFFCC00), style = Stroke(width = 2f))
 
-                        // Inner Pulsing Warning Core
                         val corePulse = 0.4f + 0.2f * sin(elapsedTime * 8f)
                         drawCircle(color = Color.Red, radius = hazard.radius * 0.45f, center = hCenter)
                         drawCircle(color = Color.Yellow.copy(alpha = corePulse), radius = hazard.radius * 0.25f, center = hCenter)
                     }
 
-                    // ---------------------------------------------------------------
-                    // REALISTIC ITEM: ICE PATCHES (Translucent Crystal & Frost)
-                    // ---------------------------------------------------------------
+                    // ICE PATCHES
                     for (ice in levelLayout.icePatches) {
                         val ix = ice.x * width; val iy = ice.y * height
                         val iw = ice.width * width; val ih = ice.height * height
@@ -1377,7 +1528,6 @@ fun SteelBallGameScreen(
                             topLeft = Offset(ix, iy), size = Size(iw, ih),
                             cornerRadius = CornerRadius(12f, 12f)
                         )
-                        // Frost Crack lines
                         drawLine(color = Color.White.copy(alpha = 0.7f), start = Offset(ix + 10f, iy + 10f), end = Offset(ix + iw * 0.4f, iy + ih * 0.6f), strokeWidth = 1.5f)
                         drawLine(color = Color.White.copy(alpha = 0.5f), start = Offset(ix + iw * 0.4f, iy + ih * 0.6f), end = Offset(ix + iw - 10f, iy + ih * 0.3f), strokeWidth = 1f)
 
@@ -1389,18 +1539,14 @@ fun SteelBallGameScreen(
                         )
                     }
 
-                    // ---------------------------------------------------------------
-                    // REALISTIC ITEM: EJECT POINTS / SPEED BOOSTERS
-                    // ---------------------------------------------------------------
+                    // SPEED BOOSTERS
                     for (booster in levelLayout.boosters) {
                         val bx = booster.x * width; val by = booster.y * height
                         val angle = atan2(booster.dirY, booster.dirX)
 
-                        // Launch Base Pad
                         drawCircle(brush = Brush.radialGradient(colors = listOf(Color(0xFF00FF66), Color(0xFF004411)), center = Offset(bx, by), radius = booster.radius * 1.3f), radius = booster.radius * 1.2f, center = Offset(bx, by))
                         drawCircle(color = Color.White, radius = booster.radius * 1.2f, center = Offset(bx, by), style = Stroke(width = 2f))
 
-                        // Animated Launch Arrow Chevrons (>> Directional Eject)
                         val offsetPulse = (elapsedTime * 40f) % 15f
                         rotate(degrees = Math.toDegrees(angle.toDouble()).toFloat(), pivot = Offset(bx, by)) {
                             for (c in -1..1) {
@@ -1415,36 +1561,57 @@ fun SteelBallGameScreen(
                         }
                     }
 
-                    // ---------------------------------------------------------------
-                    // REALISTIC ITEM: BLACK HOLES (Accretion Disk & Gravitational Ring)
-                    // ---------------------------------------------------------------
+                    // BLACK HOLES
                     for (bh in levelLayout.blackHoles) {
                         val bhX = bh.x * width; val bhY = bh.y * height
                         val bhCenter = Offset(bhX, bhY)
 
-                        // Gravitational Lensing Aura
-                        drawCircle(color = Color(0xFF9C27B0).copy(alpha = 0.25f), radius = bh.radius * 2.2f, center = bhCenter)
-                        // Swirling Accretion Disk
-                        rotate(degrees = -elapsedTime * 90f, pivot = bhCenter) {
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(Color.Black, Color(0xCC090910), Color.Transparent),
+                                center = bhCenter, radius = bh.radius * 2.8f
+                            ),
+                            radius = bh.radius * 2.8f, center = bhCenter
+                        )
+
+                        rotate(degrees = elapsedTime * 45f, pivot = bhCenter) {
                             drawCircle(
-                                brush = Brush.sweepGradient(colors = listOf(Color(0xFFFF9800), Color(0xFFE91E63), Color(0xFF3F51B5), Color(0xFFFF9800)), center = bhCenter),
-                                radius = bh.radius * 1.5f, center = bhCenter, style = Stroke(width = 6f)
+                                brush = Brush.sweepGradient(
+                                    colors = listOf(
+                                        Color(0xFFE0C090), Color(0x33FFFFFF), Color(0xFFC0A070),
+                                        Color(0x22111111), Color(0xFFE0C090)
+                                    ),
+                                    center = bhCenter
+                                ),
+                                radius = bh.radius * 1.35f,
+                                center = bhCenter,
+                                style = Stroke(width = 3.5f)
                             )
                         }
-                        // Pitch Black Event Horizon Void
-                        drawCircle(brush = Brush.radialGradient(colors = listOf(Color.Black, Color(0xFF110022)), center = bhCenter, radius = bh.radius), radius = bh.radius, center = bhCenter)
-                        drawCircle(color = Color(0xFFE040FB), radius = bh.radius, center = bhCenter, style = Stroke(width = 1.5f))
+
+                        drawCircle(
+                            color = Color(0xEEFFFFFF),
+                            radius = bh.radius * 1.08f,
+                            center = bhCenter,
+                            style = Stroke(width = 1.2f)
+                        )
+
+                        drawCircle(color = Color.Black, radius = bh.radius, center = bhCenter)
                     }
 
-                    // ---------------------------------------------------------------
-                    // WALLS (Moving walls reach full screen boundaries)
-                    // ---------------------------------------------------------------
+                    // WALLS
                     for (wall in levelLayout.walls) {
+                        val maxTravelH = 1f - wall.width
+                        val maxTravelV = 1f - wall.height
+
                         val currentWx = if (wall.isMoving && wall.moveAxis == 'H') {
-                            (0.5f + 0.5f * sin(elapsedTime * wall.speed)) * (1f - wall.width)
+                            val centerH = maxTravelH / 2f
+                            centerH + (sin(elapsedTime * wall.speed) * 0.5f) * maxTravelH * wallTravelFraction
                         } else wall.x
+
                         val currentWy = if (wall.isMoving && wall.moveAxis == 'V') {
-                            (0.5f + 0.5f * cos(elapsedTime * wall.speed)) * (1f - wall.height)
+                            val centerV = maxTravelV / 2f
+                            centerV + (cos(elapsedTime * wall.speed) * 0.5f) * maxTravelV * wallTravelFraction
                         } else wall.y
 
                         val wallTopLeft = Offset(currentWx * width, currentWy * height)
@@ -1515,7 +1682,7 @@ fun SteelBallGameScreen(
                 }
             }
 
-            // Victory Screen Overlay
+            // Victory Overlay
             if (gameState == "WON") {
                 Box(
                     modifier = Modifier
@@ -1576,7 +1743,7 @@ fun SteelBallGameScreen(
                 }
             }
 
-            // Death Screen Overlay
+            // Death Overlay
             if (gameState == "DEAD") {
                 Box(
                     modifier = Modifier
