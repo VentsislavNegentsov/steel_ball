@@ -1,4 +1,4 @@
-package com.example.steel_ball
+package com.steel_ball
 
 import android.app.Activity
 import android.content.Context

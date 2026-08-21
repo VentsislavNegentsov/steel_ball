@@ -1,4 +1,4 @@
-package com.example.steel_ball.ui.theme
+package com.steel_ball.ui.theme
 
 import android.app.Activity
 import android.os.Build

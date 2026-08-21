@@ -1,4 +1,4 @@
-package com.example.steel_ball.ui.theme
+package com.steel_ball.ui.theme
 
 import androidx.compose.ui.graphics.Color
 

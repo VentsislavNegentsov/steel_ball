@@ -4,13 +4,13 @@ plugins {
 }
 
 android {
-    namespace = "com.example.steel_ball"
+    namespace = "com.steel_ball"
     compileSdk {
         version = release(37)
     }
 
     defaultConfig {
-        applicationId = "com.example.steel_ball"
+        applicationId = "com.steel_ball"
         minSdk = 24
         targetSdk = 37
         versionCode = 1
